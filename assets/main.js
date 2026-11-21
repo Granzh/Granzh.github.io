@@ -1,62 +1,59 @@
 (() => {
-  /* reveal */
-  const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}}),{rootMargin:'0px 0px -6% 0px'});
-  document.querySelectorAll('.rv').forEach(el=>io.observe(el));
+  const root = document.documentElement;
+  const themes = document.getElementById('themes');
+  const buttons = [...themes.querySelectorAll('button')];
+  const colorPreference = matchMedia('(prefers-color-scheme: light)');
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const storageKey = 'atelier-theme';
+  let mode = 'dark';
 
-  /* =====================================================================
-     SCROLL + NAV
-     ===================================================================== */
-  const tocEl = document.getElementById('toc');
-  const secEls = [...document.querySelectorAll('[data-sec]')];
-  const tocItems = [...tocEl.children];
-  const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
-  let lenis=null;
-  if(window.Lenis&&!reduced){ lenis=new Lenis({lerp:0.09,smoothWheel:true}); }
+  try {
+    const savedMode = localStorage.getItem(storageKey);
+    if (buttons.some(button => button.dataset.m === savedMode)) mode = savedMode;
+  } catch {}
 
-  function goTo(el,off){
-    off=off||0;
-    if(lenis) lenis.scrollTo(el,{offset:off,duration:1.6});
-    else window.scrollTo({top:el.getBoundingClientRect().top+scrollY+off,behavior:'smooth'});
+  function effectiveTheme() {
+    return mode === 'system' ? (colorPreference.matches ? 'light' : 'dark') : mode;
   }
-  tocEl.addEventListener('click',e=>{
-    const li=e.target.closest('li'); if(!li) return;
-    const i=+li.dataset.i;
-    if(i<0){ lenis?lenis.scrollTo(0,{duration:1.6}):scrollTo({top:0,behavior:'smooth'}); }
-    else goTo(secEls[i],0);
-  });
-  addEventListener('keydown',e=>{
-    if(e.metaKey||e.ctrlKey||e.altKey) return;
-    if(e.target&&e.target.closest&&e.target.closest('input,textarea')) return;
-    const k=(e.code||'').replace(/^Key/,'').replace(/^Digit/,'').toLowerCase();
-    if(k==='t'){ setMode(effTheme()==='dark'?'light':'dark'); }
-    else if(k==='d'){ goTo(document.getElementById('end')); }
-    else if(k==='c'){ goTo(document.getElementById('s0'),0); }
-    else if(k>='1'&&k<='6'){ goTo(secEls[+k-1],0); }
-  });
-  document.querySelectorAll('[data-key]').forEach(a=>a.addEventListener('click',e=>{
-    e.preventDefault();
-    goTo(document.querySelector(a.getAttribute('href')),0);
-  }));
 
-  /* ---------- theme ---------- */
-  const mq=matchMedia('(prefers-color-scheme: light)');
-  let mode='dark';
-  try{ mode=localStorage.getItem('atelier-theme')||'dark'; }catch(e){}
-  const themesEl=document.getElementById('themes');
-  function effTheme(){ return mode==='system'?(mq.matches?'light':'dark'):mode; }
-  function applyTheme(){
-    document.documentElement.dataset.eff=effTheme();
-    themesEl.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.m===mode));
+  function applyTheme() {
+    root.dataset.eff = effectiveTheme();
+    for (const button of buttons) {
+      button.setAttribute('aria-pressed', String(button.dataset.m === mode));
+    }
   }
-  function setMode(m){ mode=m; try{localStorage.setItem('atelier-theme',m);}catch(e){} applyTheme(); }
-  themesEl.addEventListener('click',e=>{ const b=e.target.closest('button'); if(b) setMode(b.dataset.m); });
-  mq.addEventListener&&mq.addEventListener('change',applyTheme);
+
+  function setTheme(nextMode) {
+    mode = nextMode;
+    try { localStorage.setItem(storageKey, mode); } catch {}
+    applyTheme();
+  }
+
+  for (const button of buttons) {
+    button.addEventListener('click', () => setTheme(button.dataset.m));
+  }
+  colorPreference.addEventListener('change', applyTheme);
   applyTheme();
+  themes.hidden = false;
 
-  /* ---------- git-graph rail ---------- */
-  const rail=document.getElementById('rail'); let clr=null,railH=0;
+  const links = [...document.querySelectorAll('#toc a')];
+  const sections = links.map(link => document.getElementById(link.hash.slice(1)));
+  let activeLink = links[0];
+
+  addEventListener('keydown', event => {
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey ||
+        event.target.closest?.('input, textarea, select, [contenteditable]')) return;
+    if (event.code === 'KeyT') {
+      setTheme(effectiveTheme() === 'dark' ? 'light' : 'dark');
+    }
+  });
+
+  const rail = document.getElementById('rail');
+  let clr = null;
   function buildRail(){
-    const w=rail.clientWidth||200, h=rail.clientHeight||300; railH=h;
+    const w = rail.clientWidth;
+    const h = rail.clientHeight;
+    if (!w || !h) return;
     let seed=11; const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
     let d='M20 0V'+h, nodes='';
     let y=18+rnd()*20;
@@ -70,23 +67,58 @@
     rail.innerHTML=`<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs><g id="gg" fill="none" stroke-width="1"><path d="${d}"/>${nodes}</g><clipPath id="cl"><rect id="clr" x="0" y="0" width="${w}" height="0"/></clipPath></defs><use href="#gg" style="stroke:var(--line2)"/><use href="#gg" style="stroke:var(--acc)" clip-path="url(#cl)"/></svg>`;
     clr=document.getElementById('clr');
   }
-  addEventListener('resize',buildRail);
-
   buildRail();
-  const drawBackground = createBackground(reduced, effTheme);
-  let activeIdx = -2;
+  addEventListener('resize', buildRail);
 
-  function frame(t) {
-    if (lenis) lenis.raf(t);
-    const H = innerHeight;
-    const raw = scrollY;
-    const docH = document.documentElement.scrollHeight;
-    let idx=-1;
-    for(let i=0;i<secEls.length;i++){ if(secEls[i].getBoundingClientRect().top<H*0.5) idx=i; }
-    if(idx!==activeIdx){ tocItems.forEach(li=>li.classList.toggle('on',+li.dataset.i===idx)); activeIdx=idx; }
-    if(clr) clr.setAttribute('height',(Math.min(1,raw/Math.max(1,docH-H))*railH).toFixed(1));
-    drawBackground(t, H, raw, docH);
-    requestAnimationFrame(frame);
+  const drawBackground = createBackground(reducedMotion, effectiveTheme);
+  let activeFramePending = false;
+
+  function updateNavigation() {
+    activeFramePending = false;
+    const documentHeight = root.scrollHeight;
+    const scrollRange = Math.max(0, documentHeight - innerHeight);
+    const atBottom = scrollRange > 0 && scrollY >= scrollRange - 2;
+    let current = links[0];
+    for (let index = 1; index < sections.length; index++) {
+      if (atBottom || sections[index].getBoundingClientRect().top <= innerHeight * 0.35) {
+        current = links[index];
+      }
+    }
+
+    if (activeLink !== current) {
+      activeLink.removeAttribute('aria-current');
+      current.setAttribute('aria-current', 'location');
+      activeLink = current;
+    }
+    if (clr) {
+      const progress = scrollRange ? Math.max(0, Math.min(1, scrollY / scrollRange)) : 0;
+      clr.setAttribute('height', progress * rail.clientHeight);
+    }
   }
-  requestAnimationFrame(frame);
+
+  function scheduleNavigation() {
+    if (activeFramePending) return;
+    activeFramePending = true;
+    requestAnimationFrame(updateNavigation);
+  }
+
+  addEventListener('scroll', scheduleNavigation, { passive: true });
+  addEventListener('resize', scheduleNavigation);
+  scheduleNavigation();
+
+  if (drawBackground) {
+    if (reducedMotion) {
+      const draw = () => drawBackground(0, innerHeight, scrollY, root.scrollHeight);
+      draw();
+      addEventListener('scroll', draw, { passive: true });
+      addEventListener('resize', draw);
+      new MutationObserver(draw).observe(root, { attributes: true, attributeFilter: ['data-eff'] });
+    } else {
+      function frame(time) {
+        drawBackground(time, innerHeight, scrollY, root.scrollHeight);
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    }
+  }
 })();

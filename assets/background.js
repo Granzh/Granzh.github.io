@@ -152,27 +152,48 @@ function createBackground(reduced, effTheme) {
     outColor=vec4(mix(pc,pa,inP),1.0);
   }`;
 
-  const canvas=document.getElementById('gl'), errEl=document.getElementById('err');
+  const canvas=document.getElementById('gl');
   const gl=canvas.getContext('webgl2',{antialias:false,alpha:false,powerPreference:'high-performance'});
-  let U={}, prog=null;
-  function fail(m){ errEl.textContent=m; console.error(m); }
-  if(!gl){ fail('WebGL2 is not available in this browser.'); }
-  else{
-    const mk=(t,src)=>{const s=gl.createShader(t);gl.shaderSource(s,src);gl.compileShader(s);
-      if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){fail('Shader error:\n'+gl.getShaderInfoLog(s));return null;}return s;};
-    const vs=mk(gl.VERTEX_SHADER,VERT), fs=mk(gl.FRAGMENT_SHADER,FRAG);
-    if(vs&&fs){
-      prog=gl.createProgram(); gl.attachShader(prog,vs); gl.attachShader(prog,fs); gl.linkProgram(prog);
-      if(!gl.getProgramParameter(prog,gl.LINK_STATUS)){fail('Link error:\n'+gl.getProgramInfoLog(prog));prog=null;}
-      else{ gl.useProgram(prog); ['uRes','uDpr','uTime','uScroll','uScrollRaw','uTheme','uN','uTop','uBot','uGapSc'].forEach(n=>U[n]=gl.getUniformLocation(prog,n)); }
-    }
+  if (!gl) {
+    canvas.hidden = true;
+    return;
+  }
+
+  function compileShader(type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (gl.getShaderParameter(shader, gl.COMPILE_STATUS)) return shader;
+    console.error(gl.getShaderInfoLog(shader));
+  }
+
+  const vertex = compileShader(gl.VERTEX_SHADER, VERT);
+  const fragment = compileShader(gl.FRAGMENT_SHADER, FRAG);
+  if (!vertex || !fragment) {
+    canvas.hidden = true;
+    return;
+  }
+
+  const prog = gl.createProgram();
+  gl.attachShader(prog, vertex);
+  gl.attachShader(prog, fragment);
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(prog));
+    canvas.hidden = true;
+    return;
+  }
+  gl.useProgram(prog);
+  const U = {};
+  for (const name of ['uRes','uDpr','uTime','uScroll','uScrollRaw','uTheme','uN','uTop','uBot','uGapSc']) {
+    U[name] = gl.getUniformLocation(prog, name);
   }
 
   let DPR=1;
   function resize(){
     DPR=Math.min(window.devicePixelRatio||1,1.5);
     canvas.width=Math.round(innerWidth*DPR); canvas.height=Math.round(innerHeight*DPR);
-    if(gl) gl.viewport(0,0,canvas.width,canvas.height);
+    gl.viewport(0,0,canvas.width,canvas.height);
   }
   addEventListener('resize',resize); resize();
 
@@ -195,18 +216,16 @@ function createBackground(reduced, effTheme) {
       gaps[k]=Math.max(0,(a+b)/2-height/2);
     }
 
-    if(gl&&prog){
-      gl.uniform2f(U.uRes,canvas.width,canvas.height);
-      gl.uniform1f(U.uDpr,DPR);
-      gl.uniform1f(U.uTime,reduced?0:time*0.001);
-      gl.uniform1f(U.uScroll,sm);
-      gl.uniform1f(U.uScrollRaw,raw);
-      gl.uniform1f(U.uTheme,th);
-      gl.uniform1i(U.uN,n);
-      gl.uniform1fv(U.uTop,tops);
-      gl.uniform1fv(U.uBot,bots);
-      gl.uniform1fv(U.uGapSc,gaps);
-      gl.drawArrays(gl.TRIANGLES,0,3);
-    }
+    gl.uniform2f(U.uRes,canvas.width,canvas.height);
+    gl.uniform1f(U.uDpr,DPR);
+    gl.uniform1f(U.uTime,reduced?0:time*0.001);
+    gl.uniform1f(U.uScroll,sm);
+    gl.uniform1f(U.uScrollRaw,raw);
+    gl.uniform1f(U.uTheme,th);
+    gl.uniform1i(U.uN,n);
+    gl.uniform1fv(U.uTop,tops);
+    gl.uniform1fv(U.uBot,bots);
+    gl.uniform1fv(U.uGapSc,gaps);
+    gl.drawArrays(gl.TRIANGLES,0,3);
   };
 }
