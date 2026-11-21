@@ -34,30 +34,29 @@ function createBackground(reduced, effTheme) {
   }
   mat2 rot(float a){ float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
 
-  /* technical "paintings": u height-normalised & centred, q css px */
-  vec3 paint(vec2 u, vec2 q, int gap, float H){
+  /* u is height-normalised and centred. */
+  vec3 paint(vec2 u, int gap, float H){
     float seed=float(gap)*1.37+0.3;
     vec3 col=gBg;
 
-    // topographic contours (always)
-    float h=fbm(u*1.5+vec2(seed,seed*0.5))+0.12*sin(u.x*3.0+seed);
-    float v=h*16.0;
+    // Domain warping creates irregular ridges and enclosed basins.
+    bool withMark = gap % 2 == 0;
+    vec2 terrain = u*(withMark ? 3.0 : 4.8)+vec2(seed, seed*0.5);
+    vec2 warp = vec2(noise(terrain*0.75+5.4), noise(terrain*0.75-3.2));
+    vec2 warped = terrain + (warp-0.5)*1.5;
+    float h = noise(warped)+0.24*noise(warped*2.03+8.6);
+    float v = h*19.0;
     float fw=max(fwidth(v),1e-3);
     float fr=fract(v);
     float dist=min(fr,1.0-fr)/fw;
-    float cl=1.0-smoothstep(0.4,1.4,dist);
+    float cl=1.0-smoothstep(0.25,1.15,dist);
     float idx=floor(v+0.5);
     float strong=step(abs(mod(idx,5.0)),0.5);
-    float hi=step(abs(idx-8.0),0.5);
-    vec3 lc=mix(gLi,gAcc,hi);
-    float la=cl*mix(0.10,0.26,strong)*(1.0+2.4*hi)*mix(1.0,0.6,uTheme);
-    col=mix(col,lc,clamp(la,0.0,1.0));
+    float light=mix(0.18,0.55,strong)*mix(0.58,1.0,noise(terrain*0.55));
+    vec3 lc=mix(gLi,gAcc,strong*0.16);
+    col=mix(col,lc,cl*light*mix(1.0,0.65,uTheme));
 
-    // dot grid
-    float dd=length(fract(q/22.0)-0.5)*22.0;
-    col=mix(col,gLi,0.20*smoothstep(1.2,0.5,dd));
-
-    if(gap-(gap/2)*2==0){
+    if(withMark){
       // nested squares mark + viewfinder cross
       vec2 c=u-vec2(0.30,0.02);
       vec2 p=rot(0.52)*c;
@@ -72,22 +71,6 @@ function createBackground(reduced, effTheme) {
       float cx=(1.0-smoothstep(0.5,1.2,abs(c.y)*H))*step(abs(c.x),0.55);
       float cy=(1.0-smoothstep(0.5,1.2,abs(c.x)*H))*step(abs(c.y),0.55);
       col=mix(col,gLi,max(cx,cy)*0.18);
-    } else {
-      // ghost code
-      float rowH=16.0;
-      float ry=floor(q.y/rowH);
-      float inRow=fract(q.y/rowH);
-      float rowOn=step(0.28,inRow)*step(inRow,0.68);
-      float indent=floor(hash(vec2(ry,1.0))*4.0)*18.0+40.0;
-      float qx=q.x-indent;
-      float seg=floor(qx/9.0);
-      float run=hash(vec2(floor(qx/54.0),ry));
-      float blk=step(0.22,run)*step(0.30,hash(vec2(seg,ry)+3.7))*step(0.0,qx);
-      float fade=smoothstep(0.0,0.3,u.x+0.95)*smoothstep(0.0,0.3,0.95-u.x);
-      float hot=step(0.94,hash(vec2(ry,9.0)));
-      vec3 cc=mix(gLi,gAcc,hot);
-      col=mix(col,gAcc,hot*0.06*step(0.05,inRow)*step(inRow,0.95));
-      col=mix(col,cc,rowOn*blk*mix(0.12,0.40,hot)*fade*mix(1.0,0.5,uTheme));
     }
     return col;
   }
@@ -125,14 +108,10 @@ function createBackground(reduced, effTheme) {
       if(pp.y>uBot[i]+ob) gap=i+1;
     }
 
-    // painting: parallax 0.5x, glitch rows near the tear
-    float rowBand=floor(y/5.0);
-    float gb=step(0.84,hash(vec2(rowBand,floor(uScrollRaw/50.0))));
-    float nr=smoothstep(60.0,0.0,abs(s));
-    float qx=x+gb*nr*(hash(vec2(rowBand,3.0))-0.5)*44.0;
+    // Contours scroll at half the page speed.
     float qy=y+0.5*(uScroll-uGapSc[gap]);
-    vec2 u=(vec2(qx,qy)-vec2(W*0.5,H*0.5))/H;
-    vec3 pc=paint(u,vec2(qx,qy),gap,H);
+    vec2 u=(vec2(x,qy)-vec2(W*0.5,H*0.5))/H;
+    vec3 pc=paint(u,gap,H);
     pc*=0.96+0.08*noise(vec2(x,y)*0.9);
     pc*=1.0-mix(0.55,0.08,uTheme)*pow(length((vec2(x,y)/vec2(W,H))-0.5)*1.2,2.2);
     pc*=1.0-mix(0.55,0.06,uTheme)*smoothstep(-40.0,0.0,s)*step(s,0.0);
