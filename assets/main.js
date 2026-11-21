@@ -48,27 +48,85 @@
     }
   });
 
-  const rail = document.getElementById('rail');
-  let clr = null;
-  function buildRail(){
-    const w = rail.clientWidth;
-    const h = rail.clientHeight;
-    if (!w || !h) return;
-    let seed=11; const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
-    let d='M20 0V'+h, nodes='';
-    let y=18+rnd()*20;
-    while(y<h-70){
-      const len=50+rnd()*110, dx=rnd()<.5?16:32, y2=Math.min(h-10,y+len);
-      d+=`M20 ${y.toFixed(1)}l${dx} 14V${(y2-14).toFixed(1)}l${-dx} 14`;
-      nodes+=`<circle cx="${20+dx}" cy="${(y+14+(y2-y-28)*rnd()).toFixed(1)}" r="2.6"/>`;
-      y=y2+18+rnd()*40;
+  const tree = document.getElementById('toc');
+  const rail = document.querySelector('.tree-rail');
+  const treeNodes = [...tree.children];
+  const compactNavigation = matchMedia('(max-width: 900px), (max-height: 510px)');
+  let progressClip;
+
+  function buildRail() {
+    if (compactNavigation.matches) {
+      rail.setAttribute('hidden', '');
+      tree.removeAttribute('data-rail');
+      progressClip = null;
+      return;
     }
-    for(let k=0,yy=40;yy<h-10;k++,yy+=46+rnd()*60) nodes+=`<circle cx="20" cy="${yy.toFixed(1)}" r="2.6"/>`;
-    rail.innerHTML=`<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs><g id="gg" fill="none" stroke-width="1"><path d="${d}"/>${nodes}</g><clipPath id="cl"><rect id="clr" x="0" y="0" width="${w}" height="0"/></clipPath></defs><use href="#gg" style="stroke:var(--line2)"/><use href="#gg" style="stroke:var(--acc)" clip-path="url(#cl)"/></svg>`;
-    clr=document.getElementById('clr');
+
+    const width = tree.clientWidth;
+    const height = tree.clientHeight;
+    const trunk = 20;
+    let seed = 11;
+    function random() {
+      seed = seed * 16807 % 2147483647;
+      return seed / 2147483647;
+    }
+
+    let path = `M${trunk} 0V${height}`;
+    const points = [];
+    let y = 18 + random() * 20;
+    while (y < height - 70) {
+      const length = 50 + random() * 110;
+      const offset = random() < 0.5 ? 16 : 32;
+      const end = Math.min(height - 10, y + length);
+      path += `M${trunk} ${y.toFixed(1)}l${offset} 14V${(end - 14).toFixed(1)}l${-offset} 14`;
+      points.push({ x: trunk + offset, y: y + 14 + (end - y - 28) * random() });
+      y = end + 18 + random() * 40;
+    }
+    for (let y = 40; y < height - 10; y += 46 + random() * 60) {
+      points.push({ x: trunk, y });
+    }
+
+    const gap = (height - 56) / (treeNodes.length - 1);
+    const interactivePoints = new Set();
+    treeNodes.forEach((node, index) => {
+      const y = 28 + gap * index;
+      const position = points.find(point => Math.abs(point.y - y) < gap * 0.23);
+      if (position) interactivePoints.add(position);
+      node.style.setProperty('--node-x', `${position?.x ?? trunk}px`);
+      node.style.setProperty('--node-y', `${position?.y ?? y}px`);
+    });
+
+    const dots = points.filter(point => !interactivePoints.has(point))
+      .map(({ x, y }) => `<circle cx="${x}" cy="${y.toFixed(1)}" r="2.6"/>`).join('');
+    rail.setAttribute('width', width);
+    rail.setAttribute('height', height);
+    rail.setAttribute('viewBox', `0 0 ${width} ${height}`);
+    rail.removeAttribute('hidden');
+    rail.innerHTML = `
+      <defs>
+        <g id="tree-branches" fill="none"><path d="${path}"/>${dots}</g>
+        <clipPath id="tree-progress"><rect width="${width}" height="0"/></clipPath>
+      </defs>
+      <use href="#tree-branches" style="stroke:var(--line2)"/>
+      <use href="#tree-branches" style="stroke:var(--acc)" clip-path="url(#tree-progress)"/>`;
+    progressClip = rail.querySelector('rect');
+    tree.setAttribute('data-rail', '');
   }
-  buildRail();
-  addEventListener('resize', buildRail);
+
+  tree.addEventListener('click', event => {
+    const link = event.target.closest('a');
+    if (!link || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    const node = link.closest('details');
+    requestAnimationFrame(() => { node.open = false; });
+  });
+
+  tree.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    const node = event.target.closest('details[open]');
+    if (!node) return;
+    node.open = false;
+    node.querySelector('summary').focus();
+  });
 
   const drawBackground = createBackground(reducedMotion, effectiveTheme);
   let activeFramePending = false;
@@ -90,9 +148,9 @@
       current.setAttribute('aria-current', 'location');
       activeLink = current;
     }
-    if (clr) {
+    if (progressClip) {
       const progress = scrollRange ? Math.max(0, Math.min(1, scrollY / scrollRange)) : 0;
-      clr.setAttribute('height', progress * rail.clientHeight);
+      progressClip.setAttribute('height', progress * tree.clientHeight);
     }
   }
 
@@ -103,7 +161,11 @@
   }
 
   addEventListener('scroll', scheduleNavigation, { passive: true });
-  addEventListener('resize', scheduleNavigation);
+  addEventListener('resize', () => {
+    buildRail();
+    scheduleNavigation();
+  });
+  buildRail();
   scheduleNavigation();
 
   if (drawBackground) {
