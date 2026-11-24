@@ -6,12 +6,17 @@ function createBackground(reduced, effTheme) {
   }`;
 
   // Both passes use the same GLSL to compute the edge offsets.
+  const NOISE_SIZE = 256;
   const EDGE_GLSL=`
+  uniform highp sampler2D uNoiseTexture;
   float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
-  float noise(vec2 p){
-    vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
-    float a=hash(i), b=hash(i+vec2(1.0,0.0)), c=hash(i+vec2(0.0,1.0)), d=hash(i+vec2(1.0,1.0));
-    return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);
+  float noise(vec2 p) {
+    vec2 cell = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    // At integer lattice coordinates, sample the center of a texel.
+    vec2 uv = (cell + f + 0.5) / float(${NOISE_SIZE});
+    return textureLod(uNoiseTexture, uv, 0.0).r;
   }
   float fbm(vec2 p){
     float v=0.0, a=0.5; mat2 m=mat2(1.6,1.2,-1.2,1.6);
@@ -143,6 +148,7 @@ function createBackground(reduced, effTheme) {
     float qy=y+0.5*(uScroll-uGapSc[gap]);
     vec2 u=(vec2(x,qy)-vec2(W*0.5,H*0.5))/H;
     vec3 pc=paint(u,gap,H);
+    //vec3 pc=gBg;
     pc*=0.96+0.08*noise(vec2(x,y)*0.9);
     pc*=1.0-mix(0.55,0.08,uTheme)*pow(length((vec2(x,y)/vec2(W,H))-0.5)*1.2,2.2);
     pc*=1.0-mix(0.55,0.06,uTheme)*smoothstep(-40.0,0.0,s)*step(s,0.0);
@@ -210,10 +216,30 @@ function createBackground(reduced, effTheme) {
   const U = {};
   for (const name of [
     'uRes', 'uDpr', 'uTime', 'uScrollRaw', 'uScroll', 'uTheme',
-    'uN', 'uTop', 'uBot', 'uGapSc', 'uEdgeTexture', 'uUseEdgeTexture'
+    'uN', 'uTop', 'uBot', 'uGapSc', 'uEdgeTexture', 'uUseEdgeTexture', 'uNoiseTexture'
   ]) {
     U[name] = gl.getUniformLocation(prog, name);
   }
+
+  // Generate a reproducible tile of lattice values once per WebGL context.
+  const noiseValues = new Uint8Array(NOISE_SIZE * NOISE_SIZE);
+  let seed = 0x243f6a88;
+  for (let i = 0; i < noiseValues.length; i++) {
+    seed ^= seed << 13;
+    seed ^= seed >>> 17;
+    seed ^= seed << 5;
+    noiseValues[i] = seed >>> 24;
+  }
+
+  const noiseTexture = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, noiseTexture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, NOISE_SIZE, NOISE_SIZE, 0,
+    gl.RED, gl.UNSIGNED_BYTE, noiseValues);
 
   const edgeTexture = gl.createTexture();
   // A complete 1x1 texture keeps the sampler valid in direct-rendering mode.
@@ -224,10 +250,16 @@ function createBackground(reduced, effTheme) {
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
   gl.useProgram(prog);
   gl.uniform1i(U.uEdgeTexture, 0);
+  gl.uniform1i(U.uNoiseTexture, 1);
 
   const edgeFramebuffer = edgeProgram ? gl.createFramebuffer() : null;
   const edgeTime = edgeProgram ? gl.getUniformLocation(edgeProgram, 'uTime') : null;
   const edgeScroll = edgeProgram ? gl.getUniformLocation(edgeProgram, 'uScrollRaw') : null;
+  if (edgeProgram) {
+    gl.useProgram(edgeProgram);
+    gl.uniform1i(gl.getUniformLocation(edgeProgram, 'uNoiseTexture'), 1);
+    gl.useProgram(prog);
+  }
   const maxEdgeWidth = edgeFramebuffer
     ? Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), gl.getParameter(gl.MAX_VIEWPORT_DIMS)[0])
     : 0;
@@ -245,7 +277,7 @@ function createBackground(reduced, effTheme) {
   let lastEdgeScroll = NaN;
 
   function resize() {
-    DPR = Math.min(window.devicePixelRatio || 1, 1);
+    DPR = Math.min(window.devicePixelRatio || 1, 1.5);
     canvas.width = Math.round(innerWidth * DPR);
     canvas.height = Math.round(innerHeight * DPR);
     gl.viewport(0, 0, canvas.width, canvas.height);
