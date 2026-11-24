@@ -1,9 +1,32 @@
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("./fonts/JetBrainsMono-Regular.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("./fonts/JetBrainsMono-Medium.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("./fonts/JetBrainsMono-MediumItalic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 500;
+  font-display: swap;
+}
+
 :root {
   --left: max(24px, calc((100vw - 1180px) / 2));
   --nav-width: 182px;
   --content-left: calc(var(--left) + var(--nav-width) + 24px);
   --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
-  --serif: "Source Serif 4", Georgia, serif;
   --fg: #f7eefa;
   --mut: #c1b2d9;
   --dim: #a998c6;
@@ -31,7 +54,7 @@ html[data-eff="light"] {
 }
 * { box-sizing: border-box; }
 html { background: var(--pbg); scroll-behavior: smooth; }
-body { margin: 0; color: var(--fg); font: 1rem/1.6 var(--serif); }
+body { margin: 0; color: var(--fg); font: 1rem/1.6 var(--mono); }
 a { color: inherit; }
 button { font: inherit; }
 [hidden] { display: none !important; }
@@ -306,7 +329,6 @@ dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 @media print {
   @page { size: A4; margin: 12mm; }
   html[data-eff] {
-    --serif: Georgia, serif;
     --mono: Consolas, monospace;
     --fg: #201737;
     --mut: #4e405f;
@@ -319,7 +341,7 @@ dd { margin: 2px 0 0; overflow-wrap: anywhere; }
     color-scheme: light;
   }
   #gl, .nav, .page-controls, .actions, .mark, .col::before { display: none; }
-  body { font-size: 11pt; line-height: 1.4; }
+  body { font: 11pt/1.4 Georgia, serif; }
   .hero, .paper, .gap { padding: 5px 0; }
   .hero-card { display: block; }
   .col { width: auto; margin: 0; }
