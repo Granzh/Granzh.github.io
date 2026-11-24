@@ -47,25 +47,14 @@ function createBackground(reduced, effTheme) {
     offset = edgeOff(x, edgeIndex);
   }`;
 
-  const FRAG=`#version 300 es
-  precision highp float;
-  uniform vec2  uRes;
-  uniform float uDpr;
-  uniform float uTime;
-  uniform float uScroll;
-  uniform float uScrollRaw;
-  uniform float uTheme;      // 0 dark .. 1 light
-  uniform int   uN;
-  uniform float uTop[8];
-  uniform float uBot[8];
-  uniform float uGapSc[9];
-  uniform highp sampler2D uEdgeTexture;
-  uniform bool uUseEdgeTexture;
-  out vec4 outColor;
-
+  const PAINT_GLSL=`
   vec3 gBg; vec3 gLi; vec3 gAcc;
+  void setPaintPalette() {
+    gBg =mix(vec3(16.0,14.0,48.0),vec3(229.0,212.0,237.0),uTheme)/255.0;
+    gLi =mix(vec3(161.0,145.0,225.0),vec3(105.0,86.0,126.0),uTheme)/255.0;
+    gAcc=mix(vec3(237.0,173.0,209.0),vec3(139.0,52.0,109.0),uTheme)/255.0;
+  }
 
-  ${EDGE_GLSL}
   mat2 rot(float a){ float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
 
   /* u is height-normalised and centred. */
@@ -99,7 +88,7 @@ function createBackground(reduced, effTheme) {
       float f=fract(r);
       float px=min(f,1.0-f)/(13.0/H);
       float ring=1.0-smoothstep(0.6,1.4,px);
-      float inside=smoothstep(0.41,0.37,sd);
+      float inside=(1.0 - smoothstep(0.37,0.41,sd));
       float k=floor(r);
       col=mix(col,gAcc,ring*inside*(0.85-0.1*k));
       float cx=(1.0-smoothstep(0.5,1.2,abs(c.y)*H))*step(abs(c.x),0.55);
@@ -109,6 +98,52 @@ function createBackground(reduced, effTheme) {
     return col;
   }
 
+  `;
+
+  const PAINT_FRAG=`#version 300 es
+  precision highp float;
+  uniform vec2 uRes;
+  uniform float uDpr;
+  uniform float uTime;
+  uniform float uScrollRaw;
+  uniform float uTheme;
+  uniform float uPaintOrigin;
+  uniform int uGap;
+  out vec4 outColor;
+
+  ${EDGE_GLSL}
+  ${PAINT_GLSL}
+  void main() {
+    setPaintPalette();
+    vec2 size = uRes / uDpr;
+    vec2 point = (gl_FragCoord.xy + vec2(0.0, uPaintOrigin)) / uDpr;
+    vec2 u = (point - size * 0.5) / size.y;
+    outColor = vec4(paint(u, uGap, size.y), 1.0);
+  }`;
+
+  const FRAG=`#version 300 es
+  precision highp float;
+  uniform vec2  uRes;
+  uniform float uDpr;
+  uniform float uTime;
+  uniform float uScroll;
+  uniform float uScrollRaw;
+  uniform float uTheme;      // 0 dark .. 1 light
+  uniform int   uN;
+  uniform float uTop[8];
+  uniform float uBot[8];
+  uniform float uGapSc[9];
+  uniform highp sampler2D uEdgeTexture;
+  uniform bool uUseEdgeTexture;
+  uniform highp sampler2DArray uPaintTexture;
+  uniform bool uUsePaintTexture;
+  uniform float uPaintHeight;
+  uniform int uPaintLayer[9];
+  uniform float uPaintStart[9];
+  out vec4 outColor;
+
+  ${EDGE_GLSL}
+  ${PAINT_GLSL}
   float edgeAt(float x, int edgeIndex) {
     if (uUseEdgeTexture) {
       return texelFetch(uEdgeTexture, ivec2(int(x * 0.25), edgeIndex), 0).r;
@@ -122,9 +157,7 @@ function createBackground(reduced, effTheme) {
     float x=fc.x, y=H-fc.y;
     vec2 pp=floor(vec2(x,y)/4.0)*4.0;
 
-    gBg =mix(vec3(16.0,14.0,48.0),vec3(229.0,212.0,237.0),uTheme)/255.0;
-    gLi =mix(vec3(161.0,145.0,225.0),vec3(105.0,86.0,126.0),uTheme)/255.0;
-    gAcc=mix(vec3(237.0,173.0,209.0),vec3(139.0,52.0,109.0),uTheme)/255.0;
+    setPaintPalette();
     vec3 paperC=mix(vec3(23.0,21.0,65.0),vec3(244.0,234.0,247.0),uTheme)/255.0;
     vec3 edgeC=mix(vec3(255.0,208.0,232.0),vec3(174.0,113.0,167.0),uTheme)/255.0;
 
@@ -147,8 +180,15 @@ function createBackground(reduced, effTheme) {
     // Contours scroll at half the page speed.
     float qy=y+0.5*(uScroll-uGapSc[gap]);
     vec2 u=(vec2(x,qy)-vec2(W*0.5,H*0.5))/H;
-    vec3 pc=paint(u,gap,H);
-    //vec3 pc=gBg;
+    vec3 pc;
+    // The choice is uniform across the draw so paint() can use fwidth().
+    if (uUsePaintTexture) {
+      float paintY = (qy * uDpr - uPaintStart[gap]) / uPaintHeight;
+      pc = textureLod(uPaintTexture,
+        vec3(gl_FragCoord.x / uRes.x, paintY, float(uPaintLayer[gap])), 0.0).rgb;
+    } else {
+      pc = paint(u, gap, H);
+    }
     pc*=0.96+0.08*noise(vec2(x,y)*0.9);
     pc*=1.0-mix(0.55,0.08,uTheme)*pow(length((vec2(x,y)/vec2(W,H))-0.5)*1.2,2.2);
     pc*=1.0-mix(0.55,0.06,uTheme)*smoothstep(-40.0,0.0,s)*step(s,0.0);
@@ -211,12 +251,14 @@ function createBackground(reduced, effTheme) {
   const edgeProgram = gl.getExtension('EXT_color_buffer_float')
     ? createProgram(EDGE_FRAG)
     : null;
+  const paintProgram = createProgram(PAINT_FRAG);
   gl.deleteShader(vertex);
 
   const U = {};
   for (const name of [
     'uRes', 'uDpr', 'uTime', 'uScrollRaw', 'uScroll', 'uTheme',
-    'uN', 'uTop', 'uBot', 'uGapSc', 'uEdgeTexture', 'uUseEdgeTexture', 'uNoiseTexture'
+    'uN', 'uTop', 'uBot', 'uGapSc', 'uEdgeTexture', 'uUseEdgeTexture', 'uNoiseTexture',
+    'uPaintTexture', 'uUsePaintTexture', 'uPaintHeight', 'uPaintLayer[0]', 'uPaintStart[0]'
   ]) {
     U[name] = gl.getUniformLocation(prog, name);
   }
@@ -264,22 +306,189 @@ function createBackground(reduced, effTheme) {
     ? Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), gl.getParameter(gl.MAX_VIEWPORT_DIMS)[0])
     : 0;
 
+  const paintFramebuffer = paintProgram ? gl.createFramebuffer() : null;
+  const MAX_PAINT_LAYERS = 3;
+  const PAINT_BUDGET = 96 * 1024 * 1024;
+  const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+  const maxViewport = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
+
+  function createPaintTexture(width, height, layers) {
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, width, height, layers);
+    return texture;
+  }
+
+  // Keep the array sampler complete even when direct rendering is used.
+  gl.activeTexture(gl.TEXTURE2);
+  const emptyPaintTexture = createPaintTexture(1, 1, 1);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.uniform1i(U.uPaintTexture, 2);
+
+  const P = {};
+  if (paintProgram) {
+    for (const name of ['uRes', 'uDpr', 'uTheme', 'uGap', 'uPaintOrigin', 'uNoiseTexture']) {
+      P[name] = gl.getUniformLocation(paintProgram, name);
+    }
+    gl.useProgram(paintProgram);
+    gl.uniform1i(P.uNoiseTexture, 1);
+    gl.useProgram(prog);
+  }
+
   const tops = new Float32Array(8);
   const bots = new Float32Array(8);
   const gaps = new Float32Array(9);
   const papers = [...document.querySelectorAll('.paper')];
   const n = Math.min(papers.length, tops.length);
   const edgeRows = n * 2;
-  let DPR = 1;
+  let DPR = 0;
   let edgeWidth = 0;
   let edgeTextureReady = false;
   let lastEdgeTime = NaN;
   let lastEdgeScroll = NaN;
 
+  const paintSlotGap = new Int32Array(MAX_PAINT_LAYERS);
+  const paintSlotStart = new Float32Array(MAX_PAINT_LAYERS);
+  const paintLayer = new Int32Array(9);
+  const paintStartByGap = new Float32Array(9);
+  const neededStart = new Float32Array(9);
+  const neededEnd = new Float32Array(9);
+  let paintTexture = null;
+  let paintHeight = 0;
+  let paintLayers = 0;
+  let paintTheme = -1;
+
+  function resizePaintCache() {
+    paintSlotGap.fill(-1);
+    if (!paintFramebuffer) return;
+
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, paintFramebuffer);
+    gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, null, 0, 0);
+    if (paintTexture) gl.deleteTexture(paintTexture);
+    paintTexture = null;
+
+    const width = canvas.width;
+    paintHeight = Math.min(
+      Math.ceil(canvas.height * 1.25) + 4, maxTextureSize, maxViewport[1]
+    );
+    const layers = Math.min(n + 1, MAX_PAINT_LAYERS,
+      Math.floor(PAINT_BUDGET / (4 * width * paintHeight)));
+    paintLayers = 0;
+    if (width > 0 && width <= Math.min(maxTextureSize, maxViewport[0])
+        && canvas.height > 0 && paintHeight >= canvas.height + 4 && layers > 0) {
+      paintTexture = createPaintTexture(width, paintHeight, layers);
+      gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, paintTexture, 0, 0);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) {
+        paintLayers = layers;
+      } else {
+        gl.deleteTexture(paintTexture);
+        paintTexture = null;
+      }
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, paintTexture || emptyPaintTexture);
+    gl.activeTexture(gl.TEXTURE0);
+  }
+
+  function preparePaintCache(scroll, theme) {
+    if (!paintLayers || (theme !== 0 && theme !== 1)) return false;
+    if (paintTheme !== theme) {
+      paintSlotGap.fill(-1);
+      paintTheme = theme;
+    }
+
+    const height = canvas.height / DPR;
+    let visibleCount = 0;
+    let usedSlots = 0;
+    paintLayer.fill(-1);
+    for (let gap = 0; gap <= n; gap++) {
+      // A gap can only begin below the previous bottom and finish before the next.
+      // Include maximum torn-edge movement and the four-pixel rounding in FRAG.
+      const top = gap === 0 ? 0 : Math.max(0, bots[gap - 1] - 125);
+      const bottom = gap === n ? height : Math.min(height, bots[gap] + 125);
+      if (top > bottom) {
+        neededEnd[gap] = -Infinity;
+        continue;
+      }
+      if (++visibleCount > paintLayers) return false;
+      const shift = 0.5 * (scroll - gaps[gap]);
+      const first = Math.floor((top + shift) * DPR) - 2;
+      const last = Math.ceil((bottom + shift) * DPR) + 2;
+      if (last - first > paintHeight) return false;
+      neededStart[gap] = first;
+      neededEnd[gap] = last;
+
+      for (let slot = 0; slot < paintLayers; slot++) {
+        if (paintSlotGap[slot] === gap && paintSlotStart[slot] <= first
+            && paintSlotStart[slot] + paintHeight >= last) {
+          paintLayer[gap] = slot;
+          paintStartByGap[gap] = paintSlotStart[slot];
+          usedSlots |= 1 << slot;
+          break;
+        }
+      }
+    }
+
+    let baking = false;
+    for (let gap = 0; gap <= n; gap++) {
+      if (neededEnd[gap] === -Infinity || paintLayer[gap] !== -1) continue;
+      if (!baking) {
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, paintFramebuffer);
+        gl.viewport(0, 0, canvas.width, paintHeight);
+        gl.useProgram(paintProgram);
+        gl.uniform2f(P.uRes, canvas.width, canvas.height);
+        gl.uniform1f(P.uDpr, DPR);
+        gl.uniform1f(P.uTheme, theme);
+        baking = true;
+      }
+      let slot = 0;
+      while (usedSlots & (1 << slot)) slot++;
+      // Prefer replacing an old page of this gap over a different gap.
+      for (let old = slot; old < paintLayers; old++) {
+        if (!(usedSlots & (1 << old)) && paintSlotGap[old] === gap) {
+          slot = old;
+          break;
+        }
+      }
+      usedSlots |= 1 << slot;
+      const origin = Math.floor((neededStart[gap] + neededEnd[gap] - paintHeight) * 0.5);
+      gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, paintTexture, 0, slot);
+      gl.uniform1i(P.uGap, gap);
+      gl.uniform1f(P.uPaintOrigin, origin);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      paintSlotGap[slot] = gap;
+      paintSlotStart[slot] = origin;
+      paintLayer[gap] = slot;
+      paintStartByGap[gap] = origin;
+    }
+
+    if (baking) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, paintTexture);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.useProgram(prog);
+    }
+    return true;
+  }
+
   function resize() {
-    DPR = Math.min(window.devicePixelRatio || 1, 1.5);
-    canvas.width = Math.round(innerWidth * DPR);
-    canvas.height = Math.round(innerHeight * DPR);
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const widthPixels = Math.round(innerWidth * dpr);
+    const heightPixels = Math.round(innerHeight * dpr);
+    if (DPR !== dpr || canvas.width !== widthPixels || canvas.height !== heightPixels) {
+      DPR = dpr;
+      canvas.width = widthPixels;
+      canvas.height = heightPixels;
+      resizePaintCache();
+    }
     gl.viewport(0, 0, canvas.width, canvas.height);
 
     const width = Math.ceil(canvas.width / (DPR * 4));
@@ -306,7 +515,9 @@ function createBackground(reduced, effTheme) {
 
   return function drawBackground(time, height, raw, docHeight) {
     sm += (raw - sm) * (reduced ? 1 : 0.14);
-    th += ((effTheme() === 'light' ? 1 : 0) - th) * (reduced ? 1 : 0.12);
+    const targetTheme = effTheme() === 'light' ? 1 : 0;
+    th += (targetTheme - th) * (reduced ? 1 : 0.12);
+    if (Math.abs(targetTheme - th) < 1 / 65536) th = targetTheme;
 
     let previousBottom = 0;
     for (let i = 0; i < n; i++) {
@@ -336,6 +547,14 @@ function createBackground(reduced, effTheme) {
       gl.useProgram(prog);
       lastEdgeTime = seconds;
       lastEdgeScroll = edgeRaw;
+    }
+
+    const usePaintTexture = preparePaintCache(Math.fround(sm), th);
+    gl.uniform1i(U.uUsePaintTexture, Number(usePaintTexture));
+    if (usePaintTexture) {
+      gl.uniform1f(U.uPaintHeight, paintHeight);
+      gl.uniform1iv(U['uPaintLayer[0]'], paintLayer);
+      gl.uniform1fv(U['uPaintStart[0]'], paintStartByGap);
     }
 
     gl.uniform1i(U.uUseEdgeTexture, edgeTextureReady ? 1 : 0);
