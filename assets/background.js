@@ -107,7 +107,7 @@ function createBackground(reduced, effTheme) {
   uniform float uTime;
   uniform float uScrollRaw;
   uniform float uTheme;
-  uniform float uPaintOrigin;
+  uniform vec2 uPaintOrigin;
   uniform int uGap;
   out vec4 outColor;
 
@@ -116,7 +116,7 @@ function createBackground(reduced, effTheme) {
   void main() {
     setPaintPalette();
     vec2 size = uRes / uDpr;
-    vec2 point = (gl_FragCoord.xy + vec2(0.0, uPaintOrigin)) / uDpr;
+    vec2 point = (gl_FragCoord.xy + uPaintOrigin) / uDpr;
     vec2 u = (point - size * 0.5) / size.y;
     outColor = vec4(paint(u, uGap, size.y), 1.0);
   }`;
@@ -129,6 +129,7 @@ function createBackground(reduced, effTheme) {
   uniform float uScroll;
   uniform float uScrollRaw;
   uniform float uTheme;      // 0 dark .. 1 light
+  uniform vec2  uParallax;
   uniform int   uN;
   uniform float uTop[8];
   uniform float uBot[8];
@@ -138,6 +139,7 @@ function createBackground(reduced, effTheme) {
   uniform highp sampler2DArray uPaintTexture;
   uniform bool uUsePaintTexture;
   uniform float uPaintHeight;
+  uniform float uPaintPaddingX;
   uniform int uPaintLayer[9];
   uniform float uPaintStart[9];
   out vec4 outColor;
@@ -177,15 +179,15 @@ function createBackground(reduced, effTheme) {
       if (db < 0.0) gap = i + 1;
     }
 
-    // Contours scroll at half the page speed.
-    float qy=y+0.5*(uScroll-uGapSc[gap]);
-    vec2 u=(vec2(x,qy)-vec2(W*0.5,H*0.5))/H;
+    // The contours move behind the page-anchored paper.
+    vec2 point = vec2(x, y + 0.5 * (uScroll - uGapSc[gap])) + uParallax;
+    vec2 u = (point - vec2(W, H) * 0.5) / H;
     vec3 pc;
     // The choice is uniform across the draw so paint() can use fwidth().
     if (uUsePaintTexture) {
-      float paintY = (qy * uDpr - uPaintStart[gap]) / uPaintHeight;
-      pc = textureLod(uPaintTexture,
-        vec3(gl_FragCoord.x / uRes.x, paintY, float(uPaintLayer[gap])), 0.0).rgb;
+      vec2 paintUV = (point * uDpr + vec2(uPaintPaddingX, -uPaintStart[gap]))
+        / vec2(uRes.x + 2.0 * uPaintPaddingX, uPaintHeight);
+      pc = textureLod(uPaintTexture, vec3(paintUV, float(uPaintLayer[gap])), 0.0).rgb;
     } else {
       pc = paint(u, gap, H);
     }
@@ -256,9 +258,9 @@ function createBackground(reduced, effTheme) {
 
   const U = {};
   for (const name of [
-    'uRes', 'uDpr', 'uTime', 'uScrollRaw', 'uScroll', 'uTheme',
+    'uRes', 'uDpr', 'uTime', 'uScrollRaw', 'uScroll', 'uTheme', 'uParallax',
     'uN', 'uTop', 'uBot', 'uGapSc', 'uEdgeTexture', 'uUseEdgeTexture', 'uNoiseTexture',
-    'uPaintTexture', 'uUsePaintTexture', 'uPaintHeight', 'uPaintLayer[0]', 'uPaintStart[0]'
+    'uPaintTexture', 'uUsePaintTexture', 'uPaintHeight', 'uPaintPaddingX', 'uPaintLayer[0]', 'uPaintStart[0]'
   ]) {
     U[name] = gl.getUniformLocation(prog, name);
   }
@@ -309,6 +311,8 @@ function createBackground(reduced, effTheme) {
   const paintFramebuffer = paintProgram ? gl.createFramebuffer() : null;
   const MAX_PAINT_LAYERS = 3;
   const PAINT_BUDGET = 96 * 1024 * 1024;
+  const parallaxMaxX = reduced ? 0 : 24;
+  const parallaxMaxY = reduced ? 0 : 16;
   const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
   const maxViewport = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
 
@@ -359,6 +363,7 @@ function createBackground(reduced, effTheme) {
   const neededEnd = new Float32Array(9);
   let paintTexture = null;
   let paintHeight = 0;
+  let paintPaddingX = 0;
   let paintLayers = 0;
   let paintTheme = -1;
 
@@ -372,15 +377,18 @@ function createBackground(reduced, effTheme) {
     if (paintTexture) gl.deleteTexture(paintTexture);
     paintTexture = null;
 
-    const width = canvas.width;
+    // Bake enough extra area for the full cursor motion to reuse each cached layer.
+    paintPaddingX = Math.ceil(parallaxMaxX * DPR);
+    const minHeight = canvas.height + 2 * Math.ceil(parallaxMaxY * DPR) + 4;
+    const width = canvas.width + 2 * paintPaddingX;
     paintHeight = Math.min(
-      Math.ceil(canvas.height * 1.25) + 4, maxTextureSize, maxViewport[1]
+      Math.max(minHeight, Math.ceil(canvas.height * 1.25) + 4), maxTextureSize, maxViewport[1]
     );
     const layers = Math.min(n + 1, MAX_PAINT_LAYERS,
       Math.floor(PAINT_BUDGET / (4 * width * paintHeight)));
     paintLayers = 0;
-    if (width > 0 && width <= Math.min(maxTextureSize, maxViewport[0])
-        && canvas.height > 0 && paintHeight >= canvas.height + 4 && layers > 0) {
+    if (canvas.width > 0 && width <= Math.min(maxTextureSize, maxViewport[0])
+        && canvas.height > 0 && paintHeight >= minHeight && layers > 0) {
       paintTexture = createPaintTexture(width, paintHeight, layers);
       gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, paintTexture, 0, 0);
       if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) {
@@ -417,8 +425,8 @@ function createBackground(reduced, effTheme) {
       }
       if (++visibleCount > paintLayers) return false;
       const shift = 0.5 * (scroll - gaps[gap]);
-      const first = Math.floor((top + shift) * DPR) - 2;
-      const last = Math.ceil((bottom + shift) * DPR) + 2;
+      const first = Math.floor((top + shift - parallaxMaxY) * DPR) - 2;
+      const last = Math.ceil((bottom + shift + parallaxMaxY) * DPR) + 2;
       if (last - first > paintHeight) return false;
       neededStart[gap] = first;
       neededEnd[gap] = last;
@@ -441,7 +449,7 @@ function createBackground(reduced, effTheme) {
         gl.activeTexture(gl.TEXTURE2);
         gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
         gl.bindFramebuffer(gl.FRAMEBUFFER, paintFramebuffer);
-        gl.viewport(0, 0, canvas.width, paintHeight);
+        gl.viewport(0, 0, canvas.width + 2 * paintPaddingX, paintHeight);
         gl.useProgram(paintProgram);
         gl.uniform2f(P.uRes, canvas.width, canvas.height);
         gl.uniform1f(P.uDpr, DPR);
@@ -461,7 +469,7 @@ function createBackground(reduced, effTheme) {
       const origin = Math.floor((neededStart[gap] + neededEnd[gap] - paintHeight) * 0.5);
       gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, paintTexture, 0, slot);
       gl.uniform1i(P.uGap, gap);
-      gl.uniform1f(P.uPaintOrigin, origin);
+      gl.uniform2f(P.uPaintOrigin, -paintPaddingX, origin);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       paintSlotGap[slot] = gap;
       paintSlotStart[slot] = origin;
@@ -512,8 +520,43 @@ function createBackground(reduced, effTheme) {
 
   let sm = scrollY;
   let th = effTheme() === 'light' ? 1 : 0;
+  let targetX = 0;
+  let targetY = 0;
+  let parallaxX = 0;
+  let parallaxY = 0;
+  let previousTime;
+
+  if (!reduced) {
+    const allowMotion = matchMedia('(prefers-reduced-motion: no-preference)');
+    function resetPointer() {
+      targetX = 0;
+      targetY = 0;
+    }
+
+    addEventListener('pointermove', event => {
+      if (event.pointerType !== 'mouse' || !allowMotion.matches) return;
+      const x = Math.min(innerWidth, Math.max(0, event.clientX)) / innerWidth;
+      const y = Math.min(innerHeight, Math.max(0, event.clientY)) / innerHeight;
+      targetX = (2 * x - 1) * parallaxMaxX;
+      targetY = (2 * y - 1) * parallaxMaxY;
+    }, { passive: true });
+    document.documentElement.addEventListener('pointerleave', resetPointer);
+    addEventListener('blur', resetPointer);
+    allowMotion.addEventListener('change', () => {
+      if (allowMotion.matches) return;
+      resetPointer();
+      parallaxX = 0;
+      parallaxY = 0;
+    });
+  }
 
   return function drawBackground(time, height, raw, docHeight) {
+    const elapsed = Math.min(50, time - (previousTime ?? time));
+    previousTime = time;
+    const follow = 1 - Math.exp(-elapsed / 110);
+    parallaxX += (targetX - parallaxX) * follow;
+    parallaxY += (targetY - parallaxY) * follow;
+
     sm += (raw - sm) * (reduced ? 1 : 0.14);
     const targetTheme = effTheme() === 'light' ? 1 : 0;
     th += (targetTheme - th) * (reduced ? 1 : 0.12);
@@ -553,6 +596,7 @@ function createBackground(reduced, effTheme) {
     gl.uniform1i(U.uUsePaintTexture, Number(usePaintTexture));
     if (usePaintTexture) {
       gl.uniform1f(U.uPaintHeight, paintHeight);
+      gl.uniform1f(U.uPaintPaddingX, paintPaddingX);
       gl.uniform1iv(U['uPaintLayer[0]'], paintLayer);
       gl.uniform1fv(U['uPaintStart[0]'], paintStartByGap);
     }
@@ -564,6 +608,7 @@ function createBackground(reduced, effTheme) {
     gl.uniform1f(U.uScroll,sm);
     gl.uniform1f(U.uScrollRaw,edgeRaw);
     gl.uniform1f(U.uTheme,th);
+    gl.uniform2f(U.uParallax, parallaxX, parallaxY);
     gl.uniform1i(U.uN,n);
     gl.uniform1fv(U.uTop,tops);
     gl.uniform1fv(U.uBot,bots);
