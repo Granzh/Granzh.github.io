@@ -5,6 +5,43 @@ function createBackground(reduced, effTheme) {
     gl_Position=vec4(p*2.0-1.0,0.0,1.0);
   }`;
 
+  // Both passes use the same GLSL to compute the edge offsets.
+  const EDGE_GLSL=`
+  float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
+  float noise(vec2 p){
+    vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+    float a=hash(i), b=hash(i+vec2(1.0,0.0)), c=hash(i+vec2(0.0,1.0)), d=hash(i+vec2(1.0,1.0));
+    return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);
+  }
+  float fbm(vec2 p){
+    float v=0.0, a=0.5; mat2 m=mat2(1.6,1.2,-1.2,1.6);
+    for(int i=0;i<5;i++){ v+=a*noise(p); p=m*p; a*=0.5; }
+    return v;
+  }
+  /* torn edge */
+  float edgeOff(float x,float seed){
+    float qx=floor(x/6.0)*6.0;
+    float t=uScrollRaw*0.0008+uTime*0.04;
+    float n=fbm(vec2(qx*0.004+seed*7.3,seed*1.9+t));
+    float m=fbm(vec2(qx*0.02+seed*3.1,seed+t*2.0));
+    float j=hash(vec2(floor(x/4.0),seed))-0.5;
+    return (n-0.5)*190.0+(m-0.5)*44.0+j*8.0;
+  }
+
+  `;
+
+  const EDGE_FRAG=`#version 300 es
+  precision highp float;
+  uniform float uTime;
+  uniform float uScrollRaw;
+  layout(location = 0) out float offset;
+  ${EDGE_GLSL}
+  void main() {
+    float x = floor(gl_FragCoord.x) * 4.0;
+    float edgeIndex = floor(gl_FragCoord.y);
+    offset = edgeOff(x, edgeIndex);
+  }`;
+
   const FRAG=`#version 300 es
   precision highp float;
   uniform vec2  uRes;
@@ -17,21 +54,13 @@ function createBackground(reduced, effTheme) {
   uniform float uTop[8];
   uniform float uBot[8];
   uniform float uGapSc[9];
+  uniform highp sampler2D uEdgeTexture;
+  uniform bool uUseEdgeTexture;
   out vec4 outColor;
 
   vec3 gBg; vec3 gLi; vec3 gAcc;
 
-  float hash(vec2 p){ p=fract(p*vec2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
-  float noise(vec2 p){
-    vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
-    float a=hash(i), b=hash(i+vec2(1.0,0.0)), c=hash(i+vec2(0.0,1.0)), d=hash(i+vec2(1.0,1.0));
-    return mix(mix(a,b,f.x),mix(c,d,f.x),f.y);
-  }
-  float fbm(vec2 p){
-    float v=0.0, a=0.5; mat2 m=mat2(1.6,1.2,-1.2,1.6);
-    for(int i=0;i<5;i++){ v+=a*noise(p); p=m*p; a*=0.5; }
-    return v;
-  }
+  ${EDGE_GLSL}
   mat2 rot(float a){ float c=cos(a), s=sin(a); return mat2(c,-s,s,c); }
 
   /* u is height-normalised and centred. */
@@ -75,14 +104,11 @@ function createBackground(reduced, effTheme) {
     return col;
   }
 
-  /* torn edge */
-  float edgeOff(float x,float seed){
-    float qx=floor(x/6.0)*6.0;
-    float t=uScrollRaw*0.0008+uTime*0.04;
-    float n=fbm(vec2(qx*0.004+seed*7.3,seed*1.9+t));
-    float m=fbm(vec2(qx*0.02+seed*3.1,seed+t*2.0));
-    float j=hash(vec2(floor(x/4.0),seed))-0.5;
-    return (n-0.5)*190.0+(m-0.5)*44.0+j*8.0;
+  float edgeAt(float x, int edgeIndex) {
+    if (uUseEdgeTexture) {
+      return texelFetch(uEdgeTexture, ivec2(int(x * 0.25), edgeIndex), 0).r;
+    }
+    return edgeOff(x, float(edgeIndex));
   }
 
   void main(){
@@ -100,12 +126,17 @@ function createBackground(reduced, effTheme) {
     float s=-10000.0; int gap=0;
     for(int i=0;i<8;i++){
       if(i>=uN) break;
-      float ot=edgeOff(pp.x,float(i)*2.0);
-      float ob=edgeOff(pp.x,float(i)*2.0+1.0);
-      float dt=pp.y-(uTop[i]+ot);
-      float db=(uBot[i]+ob)-pp.y;
-      s=max(s,min(dt,db));
-      if(pp.y>uBot[i]+ob) gap=i+1;
+      float dt = pp.y - uTop[i];
+      float db = uBot[i] - pp.y;
+      int edgeIndex = i * 2;
+      if (abs(dt) <= 161.0) {
+        dt = pp.y - (uTop[i] + edgeAt(pp.x, edgeIndex));
+      }
+      if (abs(db) <= 161.0) {
+        db = (uBot[i] + edgeAt(pp.x, edgeIndex + 1)) - pp.y;
+      }
+      s = max(s, min(dt, db));
+      if (db < 0.0) gap = i + 1;
     }
 
     // Contours scroll at half the page speed.
@@ -147,59 +178,140 @@ function createBackground(reduced, effTheme) {
   }
 
   const vertex = compileShader(gl.VERTEX_SHADER, VERT);
-  const fragment = compileShader(gl.FRAGMENT_SHADER, FRAG);
-  if (!vertex || !fragment) {
+  if (!vertex) {
     canvas.hidden = true;
     return;
   }
 
-  const prog = gl.createProgram();
-  gl.attachShader(prog, vertex);
-  gl.attachShader(prog, fragment);
-  gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-    console.error(gl.getProgramInfoLog(prog));
+  function createProgram(source) {
+    const fragment = compileShader(gl.FRAGMENT_SHADER, source);
+    if (!fragment) return;
+    const program = gl.createProgram();
+    gl.attachShader(program, vertex);
+    gl.attachShader(program, fragment);
+    gl.linkProgram(program);
+    gl.deleteShader(fragment);
+    if (gl.getProgramParameter(program, gl.LINK_STATUS)) return program;
+    console.error(gl.getProgramInfoLog(program));
+    gl.deleteProgram(program);
+  }
+
+  const prog = createProgram(FRAG);
+  if (!prog) {
+    gl.deleteShader(vertex);
     canvas.hidden = true;
     return;
   }
-  gl.useProgram(prog);
+  const edgeProgram = gl.getExtension('EXT_color_buffer_float')
+    ? createProgram(EDGE_FRAG)
+    : null;
+  gl.deleteShader(vertex);
+
   const U = {};
-  for (const name of ['uRes','uDpr','uTime','uScroll','uScrollRaw','uTheme','uN','uTop','uBot','uGapSc']) {
+  for (const name of [
+    'uRes', 'uDpr', 'uTime', 'uScrollRaw', 'uScroll', 'uTheme',
+    'uN', 'uTop', 'uBot', 'uGapSc', 'uEdgeTexture', 'uUseEdgeTexture'
+  ]) {
     U[name] = gl.getUniformLocation(prog, name);
   }
 
-  let DPR=1;
-  function resize(){
-    DPR=Math.min(window.devicePixelRatio||1,1.5);
-    canvas.width=Math.round(innerWidth*DPR); canvas.height=Math.round(innerHeight*DPR);
-    gl.viewport(0,0,canvas.width,canvas.height);
-  }
-  addEventListener('resize',resize); resize();
+  const edgeTexture = gl.createTexture();
+  // A complete 1x1 texture keeps the sampler valid in direct-rendering mode.
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, edgeTexture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.useProgram(prog);
+  gl.uniform1i(U.uEdgeTexture, 0);
 
-  const tops=new Float32Array(8), bots=new Float32Array(8), gaps=new Float32Array(9);
-  const papers=[...document.querySelectorAll('.paper')];
-  let sm=scrollY, th=effTheme()==='light'?1:0;
+  const edgeFramebuffer = edgeProgram ? gl.createFramebuffer() : null;
+  const edgeTime = edgeProgram ? gl.getUniformLocation(edgeProgram, 'uTime') : null;
+  const edgeScroll = edgeProgram ? gl.getUniformLocation(edgeProgram, 'uScrollRaw') : null;
+  const maxEdgeWidth = edgeFramebuffer
+    ? Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), gl.getParameter(gl.MAX_VIEWPORT_DIMS)[0])
+    : 0;
+
+  const tops = new Float32Array(8);
+  const bots = new Float32Array(8);
+  const gaps = new Float32Array(9);
+  const papers = [...document.querySelectorAll('.paper')];
+  const n = Math.min(papers.length, tops.length);
+  const edgeRows = n * 2;
+  let DPR = 1;
+  let edgeWidth = 0;
+  let edgeTextureReady = false;
+  let lastEdgeTime = NaN;
+  let lastEdgeScroll = NaN;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 1);
+    canvas.width = Math.round(innerWidth * DPR);
+    canvas.height = Math.round(innerHeight * DPR);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+
+    const width = Math.ceil(canvas.width / (DPR * 4));
+    if (!edgeFramebuffer || !edgeRows || width === edgeWidth) return;
+    edgeWidth = width;
+    lastEdgeTime = NaN;
+    edgeTextureReady = false;
+    if (edgeWidth < 1 || edgeWidth > maxEdgeWidth) return;
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, edgeTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, edgeWidth, edgeRows, 0, gl.RED, gl.FLOAT, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, edgeFramebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, edgeTexture, 0);
+    edgeTextureReady = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  addEventListener('resize', resize);
+  resize();
+
+  let sm = scrollY;
+  let th = effTheme() === 'light' ? 1 : 0;
 
   return function drawBackground(time, height, raw, docHeight) {
-    sm+=(raw-sm)*(reduced?1:0.14);
-    th+=((effTheme()==='light'?1:0)-th)*(reduced?1:0.12);
+    sm += (raw - sm) * (reduced ? 1 : 0.14);
+    th += ((effTheme() === 'light' ? 1 : 0) - th) * (reduced ? 1 : 0.12);
 
-    const n=papers.length;
-    const tp=[], bp=[];
-    for(let i=0;i<n;i++){
-      const r=papers[i].getBoundingClientRect();
-      tops[i]=r.top; bots[i]=r.bottom; tp.push(r.top+raw); bp.push(r.bottom+raw);
+    let previousBottom = 0;
+    for (let i = 0; i < n; i++) {
+      const rect = papers[i].getBoundingClientRect();
+      tops[i] = rect.top;
+      bots[i] = rect.bottom;
+      const top = rect.top + raw;
+      gaps[i] = Math.max(0, (previousBottom + top) / 2 - height / 2);
+      previousBottom = rect.bottom + raw;
     }
-    for(let k=0;k<=n;k++){
-      const a=k===0?0:bp[k-1], b=k===n?docHeight:tp[k];
-      gaps[k]=Math.max(0,(a+b)/2-height/2);
+    gaps[n] = Math.max(0, (previousBottom + docHeight) / 2 - height / 2);
+
+    const seconds = reduced ? 0 : Math.fround(time * 0.001);
+    const edgeRaw = Math.fround(raw);
+    if (edgeTextureReady && (seconds !== lastEdgeTime || edgeRaw !== lastEdgeScroll)) {
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, edgeFramebuffer);
+      gl.viewport(0, 0, edgeWidth, edgeRows);
+      gl.useProgram(edgeProgram);
+      gl.uniform1f(edgeTime, seconds);
+      gl.uniform1f(edgeScroll, edgeRaw);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.bindTexture(gl.TEXTURE_2D, edgeTexture);
+      gl.useProgram(prog);
+      lastEdgeTime = seconds;
+      lastEdgeScroll = edgeRaw;
     }
 
+    gl.uniform1i(U.uUseEdgeTexture, edgeTextureReady ? 1 : 0);
     gl.uniform2f(U.uRes,canvas.width,canvas.height);
     gl.uniform1f(U.uDpr,DPR);
-    gl.uniform1f(U.uTime,reduced?0:time*0.001);
+    gl.uniform1f(U.uTime,seconds);
     gl.uniform1f(U.uScroll,sm);
-    gl.uniform1f(U.uScrollRaw,raw);
+    gl.uniform1f(U.uScrollRaw,edgeRaw);
     gl.uniform1f(U.uTheme,th);
     gl.uniform1i(U.uN,n);
     gl.uniform1fv(U.uTop,tops);
