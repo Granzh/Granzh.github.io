@@ -68,84 +68,50 @@ button { font: inherit; }
   inset: 0 auto 0 var(--left);
   width: var(--nav-width);
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
+  align-content: center;
   pointer-events: none;
-  font-family: var(--mono);
 }
-.tree {
-  --trunk: 19px;
-  --node-size: 36px;
-  position: relative;
+.section-links {
   display: grid;
-  grid-auto-rows: 1fr;
   margin: 0;
-  padding: 0;
+  padding: 0 26px 0 0;
   list-style: none;
 }
-.tree::before, .tree-node::before {
-  content: "";
-  position: absolute;
-  background: var(--line2);
-}
-.tree::before { inset: 0 auto 0 var(--trunk); width: 1px; }
-.tree-node {
-  --branch: 0px;
+.section-links a {
   position: relative;
-  display: flex;
-  align-items: center;
-  padding-inline-start: calc(var(--trunk) + var(--branch) - var(--node-size) / 2);
-}
-.tree-node:nth-child(3n + 2) { --branch: 25px; }
-.tree-node:nth-child(3n) { --branch: 44px; }
-.tree-node::before { top: 50%; left: var(--trunk); width: var(--branch); height: 1px; }
-.tree-node details { position: relative; pointer-events: auto; }
-.tree-node details[open] { z-index: 1; }
-.tree-node summary {
   display: grid;
-  place-items: center;
-  width: var(--node-size);
-  height: var(--node-size);
-  border: 1px solid var(--line2);
-  border-radius: 50%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
   color: var(--mut);
   font-size: .875rem;
-  list-style: none;
-  background: var(--pbg);
-  cursor: pointer;
-}
-.tree-node summary::-webkit-details-marker { display: none; }
-.tree-node summary:hover, .tree-node details[open] summary { color: var(--acc); border-color: var(--acc); }
-.tree-node details:has(a[aria-current]) summary { color: var(--on-acc); background: var(--acc); border-color: var(--acc); }
-.tree-node a {
-  position: absolute;
-  top: 50%;
-  left: calc(100% + 8px);
-  transform: translateY(-50%);
-  padding: 6px 10px;
-  border: 1px solid var(--line2);
-  background: var(--pbg);
-  color: var(--fg);
-  font-size: .875rem;
+  line-height: 1.2;
   text-decoration: none;
-  white-space: nowrap;
+  pointer-events: auto;
 }
-.tree-node a:hover { color: var(--acc); border-color: var(--acc); }
-.tree-rail {
-  position: absolute;
-  top: 0;
-  left: 0;
-  overflow: visible;
+.section-links a::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+.section-links a:hover, .section-links a:focus-visible { color: var(--fg); }
+.section-links a[aria-current] { color: var(--acc); font-weight: 500; }
+.section-links a[aria-current]::after { background: currentColor; }
+.section-connector {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: .45;
   pointer-events: none;
 }
-.tree[data-rail] { --node-size: 26px; display: block; }
-.tree[data-rail]::before, .tree[data-rail] .tree-node::before { display: none; }
-.tree[data-rail] .tree-node {
-  position: absolute;
-  left: var(--node-x);
-  top: var(--node-y);
-  display: block;
-  padding: 0;
-  transform: translate(-50%, -50%);
+.section-connector > g {
+  fill: none;
+  stroke: var(--acc);
+  stroke-width: 1px;
 }
 .page-controls {
   position: absolute;
@@ -174,7 +140,7 @@ button { font: inherit; }
 .languages a:hover { color: var(--fg); }
 .languages a[aria-current] { color: var(--acc); background: var(--panel); }
 @media screen and (prefers-reduced-motion: no-preference) {
-  html[data-language-entering] :is(.nav, main) { visibility: hidden; }
+  html[data-language-entering] :is(.nav, .section-connector, main) { visibility: hidden; }
   ::highlight(resume-strike) { text-decoration: line-through .075em; }
   ::highlight(resume-erased) { color: transparent; text-decoration-color: transparent; }
 }
@@ -376,21 +342,36 @@ dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 }
 
 @media screen and (max-width: 900px), screen and (max-height: 510px) {
-  html { scroll-padding-top: calc(58px + var(--pinned-header-height)); }
-  .nav { position: sticky; inset: 0 auto auto; display: block; width: auto; padding-inline: 12px; background: var(--pbg); border-bottom: 1px solid var(--line2); }
+  html {
+    --nav-row-height: 2.125rem;
+    --nav-height: var(--nav-row-height);
+    scroll-padding-top: calc(var(--nav-height) + var(--pinned-header-height) + 9px);
+  }
+  .nav {
+    position: sticky;
+    inset: 0 auto auto;
+    display: block;
+    width: auto;
+    padding-inline: 12px;
+    background: var(--pbg);
+    border-bottom: 1px solid var(--line2);
+  }
   html[data-header-pinned] .nav { top: var(--pinned-header-height); }
-  .tree { --trunk: 19px; grid-template-columns: repeat(6, minmax(0, 1fr)); height: 56px; max-width: 440px; margin-inline: auto; }
-  .tree::before { inset: var(--trunk) 0 auto; width: auto; height: 1px; }
-  .tree-node { align-items: flex-start; justify-content: center; padding: calc(var(--trunk) + var(--branch) - var(--node-size) / 2) 0 0; }
-  .tree-node:nth-child(3n + 2) { --branch: 8px; }
-  .tree-node:nth-child(3n) { --branch: 16px; }
-  .tree-node::before { top: var(--trunk); left: 50%; width: 1px; height: var(--branch); }
-  .tree-node a { top: calc(100% + 8px); left: 0; transform: none; }
-  .tree-node:nth-last-child(-n + 2) a { left: auto; right: 0; }
+  .section-connector { display: none; }
+  .section-links {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    column-gap: 8px;
+    max-width: 650px;
+    margin-inline: auto;
+    padding: 0;
+  }
+  .section-links a { min-height: var(--nav-row-height); font-size: .75rem; overflow-wrap: anywhere; }
   .page-controls { right: 16px; }
   .col { width: auto; margin-inline: 16px; }
 }
 @media screen and (max-width: 560px) {
+  html { --nav-height: calc(2 * var(--nav-row-height)); }
+  .section-links { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .hero-card, .grid, .entry { grid-template-columns: minmax(0, 1fr); }
   .mark { display: none; }
   .cell:nth-child(even) { border-left: 0; }
@@ -418,7 +399,7 @@ dd { margin: 2px 0 0; overflow-wrap: anywhere; }
     --pbg: #fff;
     color-scheme: light;
   }
-  #gl, .nav, .page-controls, .actions, .mark, .col::before { display: none; }
+  #gl, .nav, .section-connector, .page-controls, .actions, .mark, .col::before { display: none; }
   body { font: 11pt/1.4 Georgia, serif; }
   .hero, .paper, .gap { padding: 5px 0; }
   .hero-card { display: block; }

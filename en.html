@@ -17,46 +17,24 @@
 </head>
 <body>
 <canvas id="gl" aria-hidden="true"></canvas>
+<svg class="section-connector" aria-hidden="true" focusable="false">
+  <defs>
+    <mask id="section-connector-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="100%" height="100%">
+      <rect width="100%" height="100%" fill="white"/>
+      <path fill="black"/>
+    </mask>
+  </defs>
+  <g mask="url(#section-connector-mask)"></g>
+</svg>
 
 <nav class="nav" aria-label="Resume sections">
-  <svg class="tree-rail" aria-hidden="true" focusable="false" hidden></svg>
-  <ul class="tree" id="toc" role="list">
-    <li class="tree-node">
-      <details name="resume-sections">
-        <summary aria-label="Profile">P</summary>
-        <a href="#profile" aria-current="location">Profile</a>
-      </details>
-    </li>
-    <li class="tree-node">
-      <details name="resume-sections">
-        <summary aria-label="Experience">E</summary>
-        <a href="#experience">Experience</a>
-      </details>
-    </li>
-    <li class="tree-node">
-      <details name="resume-sections">
-        <summary aria-label="Projects">J</summary>
-        <a href="#projects">Projects</a>
-      </details>
-    </li>
-    <li class="tree-node">
-      <details name="resume-sections">
-        <summary aria-label="Skills">S</summary>
-        <a href="#skills">Skills</a>
-      </details>
-    </li>
-    <li class="tree-node">
-      <details name="resume-sections">
-        <summary aria-label="Education">U</summary>
-        <a href="#education">Education</a>
-      </details>
-    </li>
-    <li class="tree-node">
-      <details name="resume-sections">
-        <summary aria-label="Contact">C</summary>
-        <a href="#contacts">Contact</a>
-      </details>
-    </li>
+  <ul class="section-links" id="toc" role="list">
+    <li><a href="#profile" aria-current="location">Profile</a></li>
+    <li><a href="#experience">Experience</a></li>
+    <li><a href="#projects">Projects</a></li>
+    <li><a href="#skills">Skills</a></li>
+    <li><a href="#education">Education</a></li>
+    <li><a href="#contacts">Contact</a></li>
   </ul>
 </nav>
 

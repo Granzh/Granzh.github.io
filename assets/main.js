@@ -3,7 +3,8 @@
   const themes = document.getElementById('themes');
   const buttons = [...themes.querySelectorAll('button')];
   const colorPreference = matchMedia('(prefers-color-scheme: light)');
-  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const motionPreference = matchMedia('(prefers-reduced-motion: reduce)');
+  const reducedMotion = motionPreference.matches;
   const storageKey = 'atelier-theme';
   let mode = 'dark';
 
@@ -38,9 +39,16 @@
 
   const links = [...document.querySelectorAll('#toc a')];
   const sections = links.map(link => document.getElementById(link.hash.slice(1)));
+  const sectionFrames = sections.map(section => section.querySelector(':scope > .col'));
+  const connector = document.querySelector('.section-connector > g');
+  const connectorMask = document.querySelector('#section-connector-mask path');
+  const connectorPaths = sectionFrames.map(() => ({
+    main: connector.appendChild(document.createElementNS(connector.namespaceURI, 'path')),
+    upperRight: connector.appendChild(document.createElementNS(connector.namespaceURI, 'path'))
+  }));
   const hero = sections[0];
-  const heroCard = hero.querySelector('.hero-card');
-  let activeLink = links[0];
+  const heroCard = sectionFrames[0];
+  let activeIndex = 0;
 
   addEventListener('keydown', event => {
     if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey ||
@@ -50,111 +58,105 @@
     }
   });
 
-  const tree = document.getElementById('toc');
-  const rail = document.querySelector('.tree-rail');
-  const treeNodes = [...tree.children];
-  const compactNavigation = matchMedia('(max-width: 900px), (max-height: 510px)');
-  let progressClip;
-
-  function buildRail() {
-    if (compactNavigation.matches) {
-      rail.setAttribute('hidden', '');
-      tree.removeAttribute('data-rail');
-      progressClip = null;
-      return;
-    }
-
-    const width = tree.clientWidth;
-    const height = tree.clientHeight;
-    const trunk = 20;
-    let seed = 11;
-    function random() {
-      seed = seed * 16807 % 2147483647;
-      return seed / 2147483647;
-    }
-
-    let path = `M${trunk} 0V${height}`;
-    const points = [];
-    let y = 18 + random() * 20;
-    while (y < height - 70) {
-      const length = 50 + random() * 110;
-      const offset = random() < 0.5 ? 16 : 32;
-      const end = Math.min(height - 10, y + length);
-      path += `M${trunk} ${y.toFixed(1)}l${offset} 14V${(end - 14).toFixed(1)}l${-offset} 14`;
-      points.push({ x: trunk + offset, y: y + 14 + (end - y - 28) * random() });
-      y = end + 18 + random() * 40;
-    }
-    for (let y = 40; y < height - 10; y += 46 + random() * 60) {
-      points.push({ x: trunk, y });
-    }
-
-    const gap = (height - 56) / (treeNodes.length - 1);
-    const interactivePoints = new Set();
-    treeNodes.forEach((node, index) => {
-      const y = 28 + gap * index;
-      const position = points.find(point => Math.abs(point.y - y) < gap * 0.23);
-      if (position) interactivePoints.add(position);
-      node.style.setProperty('--node-x', `${position?.x ?? trunk}px`);
-      node.style.setProperty('--node-y', `${position?.y ?? y}px`);
-    });
-
-    const dots = points.filter(point => !interactivePoints.has(point))
-      .map(({ x, y }) => `<circle cx="${x}" cy="${y.toFixed(1)}" r="2.6"/>`).join('');
-    rail.setAttribute('width', width);
-    rail.setAttribute('height', height);
-    rail.setAttribute('viewBox', `0 0 ${width} ${height}`);
-    rail.removeAttribute('hidden');
-    rail.innerHTML = `
-      <defs>
-        <g id="tree-branches" fill="none"><path d="${path}"/>${dots}</g>
-        <clipPath id="tree-progress"><rect width="${width}" height="0"/></clipPath>
-      </defs>
-      <use href="#tree-branches" style="stroke:var(--line2)"/>
-      <use href="#tree-branches" style="stroke:var(--acc)" clip-path="url(#tree-progress)"/>`;
-    progressClip = rail.querySelector('rect');
-    tree.setAttribute('data-rail', '');
-  }
-
-  tree.addEventListener('click', event => {
-    const link = event.target.closest('a');
-    if (!link || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-    const node = link.closest('details');
-    requestAnimationFrame(() => { node.open = false; });
-  });
-
-  tree.addEventListener('keydown', event => {
-    if (event.key !== 'Escape') return;
-    const node = event.target.closest('details[open]');
-    if (!node) return;
-    node.open = false;
-    node.querySelector('summary').focus();
-  });
-
   const drawBackground = createBackground(reducedMotion, effectiveTheme);
   let activeFramePending = false;
+  let connectorOpacity = null;
+  let connectorTransition = null;
 
-  function updateNavigation() {
+  function updateConnector(time, link, frames, lead, sectionChanged) {
+    const linkBox = link.getBoundingClientRect();
+    const dotRadius = parseFloat(getComputedStyle(link, '::after').width) / 2;
+    const dotX = linkBox.right - dotRadius;
+    const dotY = linkBox.top + linkBox.height / 2;
+    const easedLead = lead * lead * (3 - 2 * lead);
+    const targetOpacity = frames.map((_, index) => ({
+      main: Number(index === activeIndex),
+      upperRight: index === activeIndex ? 1 - easedLead : index === activeIndex + 1 ? easedLead : 0
+    }));
+
+    if (motionPreference.matches) {
+      connectorTransition = null;
+    } else if (sectionChanged && connectorOpacity) {
+      connectorTransition = { from: connectorOpacity, start: time };
+    }
+
+    connectorOpacity = targetOpacity;
+    if (connectorTransition) {
+      const { from, start } = connectorTransition;
+      const progress = (time - start) / 220;
+      if (progress < 1) {
+        const eased = 1 - (1 - progress) ** 3;
+        connectorOpacity = targetOpacity.map(({ main, upperRight }, index) => {
+          const previous = from[index];
+          return {
+            main: previous.main + (main - previous.main) * eased,
+            upperRight: previous.upperRight + (upperRight - previous.upperRight) * eased
+          };
+        });
+        scheduleNavigation();
+      } else {
+        connectorTransition = null;
+      }
+    }
+
+    frames.forEach(({ left, top, right, bottom }, index) => {
+      const { main, upperRight } = connectorPaths[index];
+      const opacity = connectorOpacity[index];
+      main.setAttribute('opacity', opacity.main);
+      upperRight.setAttribute('opacity', opacity.upperRight);
+      if (opacity.main > 0) {
+        main.setAttribute('d', `M ${left} ${top} L ${dotX} ${dotY} L ${left} ${bottom} M ${dotX} ${dotY} L ${right} ${bottom}`);
+      }
+      if (opacity.upperRight > 0) {
+        upperRight.setAttribute('d', `M ${dotX} ${dotY} L ${right} ${top}`);
+      }
+    });
+  }
+
+  function updateNavigation(time) {
     activeFramePending = false;
     const documentHeight = root.scrollHeight;
     const scrollRange = Math.max(0, documentHeight - innerHeight);
     const atBottom = scrollRange > 0 && scrollY >= scrollRange - 2;
-    let current = links[0];
+    const scrollPadding = parseFloat(getComputedStyle(root).scrollPaddingTop) || 0;
+    const activationLine = Math.max(innerHeight * 0.35, scrollPadding + 1);
+    let currentIndex = 0;
     for (let index = 1; index < sections.length; index++) {
-      if (atBottom || sections[index].getBoundingClientRect().top <= innerHeight * 0.35) {
-        current = links[index];
+      if (atBottom || sections[index].getBoundingClientRect().top <= activationLine) {
+        currentIndex = index;
       }
     }
 
-    if (activeLink !== current) {
-      activeLink.removeAttribute('aria-current');
-      current.setAttribute('aria-current', 'location');
-      activeLink = current;
+    const currentLink = links[currentIndex];
+    const sectionChanged = activeIndex !== currentIndex;
+    if (sectionChanged) {
+      links[activeIndex].removeAttribute('aria-current');
+      currentLink.setAttribute('aria-current', 'location');
+      activeIndex = currentIndex;
     }
-    if (progressClip) {
-      const progress = scrollRange ? Math.max(0, Math.min(1, scrollY / scrollRange)) : 0;
-      progressClip.setAttribute('height', progress * tree.clientHeight);
-    }
+
     const card = heroCard.getBoundingClientRect();
+    if (connector.ownerSVGElement.getClientRects().length) {
+      const frames = [card, ...sectionFrames.slice(1).map(frame => frame.getBoundingClientRect())];
+      connectorMask.setAttribute('d', frames.map(({ left, top, right, bottom }) =>
+        `M ${left} ${top} H ${right} V ${bottom} H ${left} Z`
+      ).join(' '));
+      const nextIndex = currentIndex + 1;
+      let lead = 0;
+      if (frames[nextIndex] && !motionPreference.matches) {
+        let distanceToSwitch = sections[nextIndex].getBoundingClientRect().top - activationLine;
+        if (nextIndex === sections.length - 1 && scrollRange > 0) {
+          distanceToSwitch = Math.min(distanceToSwitch, scrollRange - scrollY);
+        }
+        const leadDistance = 120;
+        lead = Math.max(0, Math.min(1, 1 - distanceToSwitch / leadDistance));
+      }
+      updateConnector(time, currentLink, frames, lead, sectionChanged);
+    } else {
+      connectorOpacity = null;
+      connectorTransition = null;
+    }
+
     const viewportWidth = root.clientWidth;
     const progress = Math.max(0, Math.min(1, -card.top / card.height));
     const spread = progress * progress * (3 - 2 * progress);
@@ -173,11 +175,12 @@
   }
 
   addEventListener('scroll', scheduleNavigation, { passive: true });
-  addEventListener('resize', () => {
-    buildRail();
-    scheduleNavigation();
-  });
-  buildRail();
+  addEventListener('resize', scheduleNavigation);
+  motionPreference.addEventListener('change', scheduleNavigation);
+  if ('ResizeObserver' in window) {
+    const frameObserver = new ResizeObserver(scheduleNavigation);
+    for (const frame of sectionFrames) frameObserver.observe(frame);
+  }
   scheduleNavigation();
 
   if (!reducedMotion && 'IntersectionObserver' in window) {
