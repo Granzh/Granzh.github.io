@@ -84,7 +84,7 @@ button { font: inherit; }
   align-items: center;
   gap: 6px;
   min-height: 32px;
-  color: var(--mut);
+  color: var(--fg);
   font-size: .875rem;
   line-height: 1.2;
   text-decoration: none;
@@ -97,7 +97,7 @@ button { font: inherit; }
   border: 1px solid currentColor;
   border-radius: 50%;
 }
-.section-links a:hover, .section-links a:focus-visible { color: var(--fg); }
+.section-links a:hover, .section-links a:focus-visible { color: var(--acc-hover); }
 .section-links a[aria-current] { color: var(--acc); font-weight: 500; }
 .section-links a[aria-current]::after { background: currentColor; }
 .section-connector {

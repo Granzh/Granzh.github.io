@@ -1,4 +1,5 @@
 function createBackground(reduced, effTheme) {
+  const navLabels = [...document.querySelectorAll('#toc a')];
   const VERT=`#version 300 es
   void main(){
     vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2));
@@ -142,6 +143,9 @@ function createBackground(reduced, effTheme) {
   uniform float uPaintPaddingX;
   uniform int uPaintLayer[9];
   uniform float uPaintStart[9];
+  uniform int uNavLabelCount;
+  uniform vec4 uNavExtent;
+  uniform vec4 uNavLabels[${navLabels.length}];
   out vec4 outColor;
 
   ${EDGE_GLSL}
@@ -151,6 +155,23 @@ function createBackground(reduced, effTheme) {
       return texelFetch(uEdgeTexture, ivec2(int(x * 0.25), edgeIndex), 0).r;
     }
     return edgeOff(x, float(edgeIndex));
+  }
+
+  float labelBacking(vec2 point, float edgeY) {
+    if (uNavLabelCount == 0
+        || any(lessThan(point, uNavExtent.xy - 3.0))
+        || any(greaterThan(point, uNavExtent.zw + 3.0))) return 0.0;
+
+    for (int i = 0; i < uNavLabelCount; i++) {
+      vec4 label = uNavLabels[i];
+      if (edgeY < label.y || edgeY > label.w) continue;
+      vec2 margin = min(point - label.xy, label.zw - point);
+      float underText = smoothstep(-3.0, 0.0, min(margin.x, margin.y));
+      if (underText > 0.0) {
+        return underText * (1.0 - smoothstep(4.0, 10.0, abs(point.y - edgeY)));
+      }
+    }
+    return 0.0;
   }
 
   void main(){
@@ -164,6 +185,7 @@ function createBackground(reduced, effTheme) {
     vec3 edgeC=mix(vec3(255.0,208.0,232.0),vec3(174.0,113.0,167.0),uTheme)/255.0;
 
     float s=-10000.0; int gap=0;
+    float edgeY = -10000.0;
     for(int i=0;i<8;i++){
       if(i>=uN) break;
       float dt = pp.y - uTop[i];
@@ -175,7 +197,11 @@ function createBackground(reduced, effTheme) {
       if (abs(db) <= 161.0) {
         db = (uBot[i] + edgeAt(pp.x, edgeIndex + 1)) - pp.y;
       }
-      s = max(s, min(dt, db));
+      float paperDistance = min(dt, db);
+      if (paperDistance > s) {
+        s = paperDistance;
+        edgeY = pp.y + (dt < db ? -dt : db);
+      }
       if (db < 0.0) gap = i + 1;
     }
 
@@ -207,7 +233,8 @@ function createBackground(reduced, effTheme) {
     pa=mix(pa,gAcc,clamp(glow*0.20,0.0,1.0));
     pa=mix(pa,mix(gAcc,edgeC,0.35),clamp(line*flick,0.0,1.0));
 
-    outColor=vec4(mix(pc,pa,inP),1.0);
+    vec3 color = mix(pc, pa, inP);
+    outColor = vec4(mix(color, paperC, 0.94 * labelBacking(vec2(x, y), edgeY)), 1.0);
   }`;
 
   const canvas=document.getElementById('gl');
@@ -260,6 +287,7 @@ function createBackground(reduced, effTheme) {
   for (const name of [
     'uRes', 'uDpr', 'uTime', 'uScrollRaw', 'uScroll', 'uTheme', 'uParallax',
     'uN', 'uTop', 'uBot', 'uGapSc', 'uEdgeTexture', 'uUseEdgeTexture', 'uNoiseTexture',
+    'uNavLabelCount', 'uNavExtent', 'uNavLabels[0]',
     'uPaintTexture', 'uUsePaintTexture', 'uPaintHeight', 'uPaintPaddingX', 'uPaintLayer[0]', 'uPaintStart[0]'
   ]) {
     U[name] = gl.getUniformLocation(prog, name);
@@ -349,6 +377,9 @@ function createBackground(reduced, effTheme) {
   const papers = [...document.querySelectorAll('.paper')];
   const n = Math.min(papers.length, tops.length);
   const edgeRows = n * 2;
+  const sidebar = matchMedia('screen and (width > 900px) and (height > 510px)');
+  const labelRange = document.createRange();
+  const labelBoxes = new Float32Array(navLabels.length * 4);
   let DPR = 0;
   let edgeWidth = 0;
   let edgeTextureReady = false;
@@ -550,6 +581,25 @@ function createBackground(reduced, effTheme) {
     });
   }
 
+  function uploadNavLabels() {
+    const count = sidebar.matches ? navLabels.length : 0;
+    gl.uniform1i(U.uNavLabelCount, count);
+    if (!count) return;
+
+    let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity;
+    for (let index = 0; index < count; index++) {
+      labelRange.selectNodeContents(navLabels[index]);
+      const rect = labelRange.getBoundingClientRect();
+      labelBoxes.set([rect.left, rect.top, rect.right, rect.bottom], index * 4);
+      left = Math.min(left, rect.left);
+      top = Math.min(top, rect.top);
+      right = Math.max(right, rect.right);
+      bottom = Math.max(bottom, rect.bottom);
+    }
+    gl.uniform4f(U.uNavExtent, left, top, right, bottom);
+    gl.uniform4fv(U['uNavLabels[0]'], labelBoxes);
+  }
+
   return function drawBackground(time, height, raw, docHeight) {
     const elapsed = Math.min(50, time - (previousTime ?? time));
     previousTime = time;
@@ -613,6 +663,7 @@ function createBackground(reduced, effTheme) {
     gl.uniform1fv(U.uTop,tops);
     gl.uniform1fv(U.uBot,bots);
     gl.uniform1fv(U.uGapSc,gaps);
+    uploadNavLabels();
     gl.drawArrays(gl.TRIANGLES,0,3);
   };
 }
