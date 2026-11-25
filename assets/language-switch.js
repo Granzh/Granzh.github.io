@@ -1,32 +1,66 @@
 (() => {
-  const highlights = window.CSS?.highlights;
-  if (!highlights || !window.Highlight || !window.StaticRange) return;
-
   const root = document.documentElement;
-  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-  const storageKey = 'resume-language-transition';
-  let incoming = false;
-  let storage;
-
-  // Read the handoff before the first paint so the new text starts hidden.
-  try {
-    storage = sessionStorage;
-    const pending = JSON.parse(storage.getItem(storageKey));
-    if (pending?.href === location.href) {
-      storage.removeItem(storageKey);
-      incoming = !reducedMotion.matches && pending.expires > Date.now();
+  const languageLinks = [...document.querySelectorAll('.languages a')];
+  const bindings = [];
+  for (const attribute of ['text', 'aria-label', 'title', 'href', 'content', 'class', 'data-mistyped']) {
+    const translation = attribute === 'text' ? 'data-en' : `data-en-${attribute}`;
+    for (const element of document.querySelectorAll(`[${translation}]`)) {
+      const original = attribute === 'text' ? element.textContent : element.getAttribute(attribute);
+      bindings.push({ element, attribute, ru: original, en: element.getAttribute(translation) });
     }
-  } catch {
-    return;
   }
+  const languageContent = [...document.querySelectorAll('[data-lang-only]')];
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  const highlights = window.CSS?.highlights;
+  const canAnimate = Boolean(highlights && window.Highlight && window.StaticRange);
+  const strike = canAnimate ? new Highlight() : null;
+  const erased = canAnimate ? new Highlight() : null;
+  if (erased) erased.priority = 1;
 
-  if (incoming) root.setAttribute('data-language-entering', '');
-
-  const strike = new Highlight();
-  const erased = new Highlight();
-  erased.priority = 1;
   let frame;
   let destination;
+
+  function urlLanguage() {
+    return new URLSearchParams(location.search).get('lang') === 'en' ? 'en' : 'ru';
+  }
+
+  function languageURL(language) {
+    const url = new URL(location.href);
+    if (language === 'en') url.searchParams.set('lang', 'en');
+    else url.searchParams.delete('lang');
+    return url;
+  }
+
+  function updateLanguageLinks() {
+    for (const link of languageLinks) {
+      link.href = languageURL(link.hreflang);
+      if (link.hreflang === root.lang) link.setAttribute('aria-current', 'page');
+      else link.removeAttribute('aria-current');
+    }
+  }
+
+  function applyLanguage(language, preserveSection = false) {
+    const activeLink = preserveSection && document.querySelector('#toc [aria-current]');
+    const section = activeLink && document.getElementById(activeLink.hash.slice(1));
+    const before = section && section.getBoundingClientRect().top;
+
+    for (const { element, attribute, [language]: value } of bindings) {
+      if (attribute === 'text') element.textContent = value;
+      else if (value === null) element.removeAttribute(attribute);
+      else element.setAttribute(attribute, value);
+    }
+    for (const element of languageContent) {
+      element.hidden = element.dataset.langOnly !== language;
+    }
+    root.lang = language;
+    updateLanguageLinks();
+
+    if (section) {
+      const delta = section.getBoundingClientRect().top - before;
+      if (delta) scrollBy({ top: delta, behavior: 'instant' });
+    }
+    document.dispatchEvent(new Event('language-switch-end'));
+  }
 
   function getTextNodes() {
     const nodes = [];
@@ -55,24 +89,15 @@
 
   function cleanup() {
     cancelAnimationFrame(frame);
-    highlights.delete('resume-strike');
-    highlights.delete('resume-erased');
-    root.removeAttribute('data-language-entering');
+    highlights?.delete('resume-strike');
+    highlights?.delete('resume-erased');
     destination = undefined;
-  }
-
-  function navigate(href) {
-    try {
-      storage.setItem(storageKey, JSON.stringify({ href, expires: Date.now() + 10000 }));
-    } catch {}
-    location.assign(href);
   }
 
   function reveal() {
     const nodes = getTextNodes();
     highlights.set('resume-erased', erased);
     paint(erased, nodes, 0, true);
-    root.removeAttribute('data-language-entering');
 
     let start;
     function tick(now) {
@@ -85,7 +110,14 @@
     frame = requestAnimationFrame(tick);
   }
 
-  function strikeAndErase(href) {
+  function switchLanguage(language, animate = false) {
+    cleanup();
+    history.pushState(null, '', languageURL(language));
+    applyLanguage(language, true);
+    if (animate) reveal();
+  }
+
+  function strikeAndErase(language) {
     const strikeDuration = 380;
     const eraseStart = strikeDuration + 130;
     const eraseDuration = 330;
@@ -104,7 +136,7 @@
         paint(strike, nodes, progress, true);
         paint(erased, nodes, progress);
         if (progress === 1) {
-          navigate(href);
+          switchLanguage(language, true);
           return;
         }
       }
@@ -113,30 +145,46 @@
     frame = requestAnimationFrame(tick);
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
-    const link = document.querySelector('.languages a[hreflang]');
+  for (const link of languageLinks) {
     link.addEventListener('click', event => {
       if (event.defaultPrevented || event.button !== 0 ||
           event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-      if (reducedMotion.matches) return;
 
       event.preventDefault();
-      if (destination) return;
-      cleanup();
-      destination = link.href;
+      const language = link.hreflang;
+      if (destination || language === root.lang) return;
+
       document.dispatchEvent(new Event('language-switch-start'));
-      strikeAndErase(destination);
+      if (canAnimate && !reducedMotion.matches) {
+        cleanup();
+        destination = language;
+        strikeAndErase(language);
+      } else {
+        switchLanguage(language);
+      }
     });
+  }
 
-    if (incoming && !reducedMotion.matches) reveal();
-    else cleanup();
+  addEventListener('popstate', () => {
+    cleanup();
+    const language = urlLanguage();
+    if (language !== root.lang) {
+      document.dispatchEvent(new Event('language-switch-start'));
+      applyLanguage(language);
+    } else {
+      updateLanguageLinks();
+    }
   });
-
+  addEventListener('hashchange', updateLanguageLinks);
   reducedMotion.addEventListener('change', () => {
     if (!reducedMotion.matches) return;
-    const href = destination;
-    cleanup();
-    if (href) location.assign(href);
+    const language = destination;
+    if (language) switchLanguage(language);
+    else cleanup();
   });
   addEventListener('pagehide', cleanup);
+
+  const language = urlLanguage();
+  if (language !== root.lang) applyLanguage(language);
+  else updateLanguageLinks();
 })();

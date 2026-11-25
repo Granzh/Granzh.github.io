@@ -177,6 +177,7 @@
   addEventListener('scroll', scheduleNavigation, { passive: true });
   addEventListener('resize', scheduleNavigation);
   motionPreference.addEventListener('change', scheduleNavigation);
+  document.addEventListener('language-switch-end', scheduleNavigation);
   if ('ResizeObserver' in window) {
     const frameObserver = new ResizeObserver(scheduleNavigation);
     for (const frame of sectionFrames) frameObserver.observe(frame);
@@ -213,6 +214,7 @@
       draw();
       addEventListener('scroll', draw, { passive: true });
       addEventListener('resize', draw);
+      document.addEventListener('language-switch-end', draw);
       new MutationObserver(draw).observe(root, { attributes: true, attributeFilter: ['data-eff'] });
     } else {
       function frame(time) {

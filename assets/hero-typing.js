@@ -6,7 +6,7 @@
   const letter = typing.querySelector('.surname-letter');
   const cursor = typing.querySelector('.surname-cursor');
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-  if (reducedMotion.matches || document.documentElement.hasAttribute('data-language-entering')) return;
+  if (reducedMotion.matches) return;
 
   const wrong = Array.from(surname.dataset.mistyped);
   const correct = Array.from(original.textContent);
