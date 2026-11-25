@@ -168,6 +168,30 @@
   buildRail();
   scheduleNavigation();
 
+  if (!reducedMotion && 'IntersectionObserver' in window) {
+    const revealItems = [...document.querySelectorAll('main :is(.intro, .entry, .cell, .contact-list > div)')]
+      .filter(item => item.getBoundingClientRect().top >= innerHeight);
+    const revealObserver = new IntersectionObserver(entries => {
+      for (const { target, isIntersecting } of entries) {
+        if (!isIntersecting || target.dataset.scrollReveal !== 'pending') continue;
+        target.dataset.scrollReveal = 'shown';
+        revealObserver.unobserve(target);
+      }
+    });
+
+    for (const item of revealItems) {
+      item.dataset.scrollReveal = 'pending';
+      revealObserver.observe(item);
+    }
+
+    document.addEventListener('focusin', event => {
+      const item = event.target.closest('[data-scroll-reveal]');
+      if (!item) return;
+      delete item.dataset.scrollReveal;
+      revealObserver.unobserve(item);
+    });
+  }
+
   if (drawBackground) {
     if (reducedMotion) {
       const draw = () => drawBackground(0, innerHeight, scrollY, root.scrollHeight);
