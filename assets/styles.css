@@ -311,7 +311,12 @@ dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 .project-link { display: inline-block; margin-top: 10px; font-size: .875rem; }
 .tags { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 0; margin: 16px 0 0; }
 .tags li { max-width: 100%; padding: 2px 8px; background: var(--panel); border: 1px solid var(--line); overflow-wrap: anywhere; }
-.contacts { padding-bottom: clamp(54px, 12vh, 112px); }
+.contacts {
+  --footer-space: clamp(54px, 12vh, 112px);
+  padding-bottom: var(--footer-space);
+  background: linear-gradient(transparent, var(--footer-color, var(--pbg)) 70%) bottom / 100% var(--footer-space) no-repeat;
+}
+html[data-eff="light"] .contacts { --footer-color: #fff; }
 .contact-list { margin: 0; }
 .contact-list > div { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(0, 3fr); gap: 16px; align-items: baseline; padding: 12px clamp(24px, 4vw, 48px); }
 .contact-list > div + div { border-top: 1px solid var(--line); }

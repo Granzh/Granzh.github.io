@@ -189,13 +189,17 @@ function createBackground(reduced, effTheme) {
     for(int i=0;i<8;i++){
       if(i>=uN) break;
       float dt = pp.y - uTop[i];
-      float db = uBot[i] - pp.y;
       int edgeIndex = i * 2;
       if (abs(dt) <= 161.0) {
         dt = pp.y - (uTop[i] + edgeAt(pp.x, edgeIndex));
       }
-      if (abs(db) <= 161.0) {
-        db = (uBot[i] + edgeAt(pp.x, edgeIndex + 1)) - pp.y;
+      // The final sheet continues to the bottom of the page.
+      float db = 10000.0;
+      if (i < uN - 1) {
+        db = uBot[i] - pp.y;
+        if (abs(db) <= 161.0) {
+          db = (uBot[i] + edgeAt(pp.x, edgeIndex + 1)) - pp.y;
+        }
       }
       float paperDistance = min(dt, db);
       if (paperDistance > s) {
@@ -376,7 +380,7 @@ function createBackground(reduced, effTheme) {
   const gaps = new Float32Array(9);
   const papers = [...document.querySelectorAll('.paper')];
   const n = Math.min(papers.length, tops.length);
-  const edgeRows = n * 2;
+  const edgeRows = Math.max(0, n * 2 - 1);
   const sidebar = matchMedia('screen and (width > 900px) and (height > 510px)');
   const labelRange = document.createRange();
   const labelBoxes = new Float32Array(navLabels.length * 4);
