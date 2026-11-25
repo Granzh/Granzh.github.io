@@ -308,18 +308,20 @@ h3 { margin: 0; font-size: 1.35rem; }
     radial-gradient(ellipse at 60% 35%, var(--panel), transparent 75%),
     var(--pbg);
 }
-.mark::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: url("./topographic-contours.png") center / cover no-repeat;
-  mix-blend-mode: screen;
-  opacity: .88;
-}
-html[data-eff="light"] .mark::before {
-  filter: invert(1);
-  mix-blend-mode: multiply;
-  opacity: .65;
+@media screen and (width > 560px) {
+  .mark::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: url("./topographic-contours.webp") center / cover no-repeat;
+    mix-blend-mode: screen;
+    opacity: .88;
+  }
+  html[data-eff="light"] .mark::before {
+    filter: invert(1);
+    mix-blend-mode: multiply;
+    opacity: .65;
+  }
 }
 .profile-details { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; border-top: 1px solid var(--line); }
 .profile-details > div { padding: 14px clamp(24px, 4vw, 56px); }
