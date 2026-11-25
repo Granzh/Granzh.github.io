@@ -38,6 +38,8 @@
 
   const links = [...document.querySelectorAll('#toc a')];
   const sections = links.map(link => document.getElementById(link.hash.slice(1)));
+  const hero = sections[0];
+  const heroCard = hero.querySelector('.hero-card');
   let activeLink = links[0];
 
   addEventListener('keydown', event => {
@@ -152,6 +154,16 @@
       const progress = scrollRange ? Math.max(0, Math.min(1, scrollY / scrollRange)) : 0;
       progressClip.setAttribute('height', progress * tree.clientHeight);
     }
+    const card = heroCard.getBoundingClientRect();
+    const viewportWidth = root.clientWidth;
+    const progress = Math.max(0, Math.min(1, -card.top / card.height));
+    const spread = progress * progress * (3 - 2 * progress);
+    const x = card.left * (1 - spread);
+    const y = Math.max(0, card.bottom - 2);
+    const scale = card.width / viewportWidth * (1 - spread) + spread;
+    hero.style.setProperty('--hero-line-transform', `translate(${x}px, ${y}px) scaleX(${scale})`);
+    hero.style.setProperty('--hero-line-opacity', progress);
+    root.toggleAttribute('data-header-pinned', card.bottom <= 0);
   }
 
   function scheduleNavigation() {

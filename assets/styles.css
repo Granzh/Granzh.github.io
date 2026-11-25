@@ -155,6 +155,7 @@ button { font: inherit; }
   align-items: center;
   gap: 10px;
 }
+.pinned-actions { display: none; }
 .languages, .themes {
   display: grid;
   grid-auto-flow: column;
@@ -209,9 +210,56 @@ main { position: relative; }
   background-repeat: no-repeat;
   opacity: .55;
 }
-.hero { padding: clamp(48px, 14vh, 132px) 0 48px; }
+.hero { position: relative; padding: clamp(48px, 14vh, 132px) 0 48px; }
 .hero-card { display: grid; grid-template-columns: minmax(0, 1fr) minmax(126px, 27%); }
 .hero-copy { padding: clamp(24px, 4vw, 56px); }
+@media screen {
+  .hero::after {
+    content: "";
+    position: fixed;
+    z-index: 4;
+    inset: 0 0 auto;
+    height: 2px;
+    background: var(--acc);
+    opacity: var(--hero-line-opacity, 0);
+    transform: var(--hero-line-transform, none);
+    transform-origin: left center;
+    pointer-events: none;
+  }
+  html {
+    --pinned-header-height: 48px;
+    scroll-padding-top: var(--pinned-header-height);
+  }
+  html[data-header-pinned] .page-controls {
+    position: fixed;
+    z-index: 3;
+    inset: 2px 0 auto;
+    height: calc(var(--pinned-header-height) - 2px);
+    padding-inline: clamp(8px, 3vw, 32px);
+    border-bottom: 1px solid var(--line);
+    background: var(--pbg);
+  }
+  html[data-header-pinned] .pinned-actions {
+    display: flex;
+    gap: 8px;
+    margin-inline-end: auto;
+  }
+  .pinned-actions .button {
+    min-height: 32px;
+    padding: 4px 10px;
+    white-space: nowrap;
+  }
+}
+@media screen and (prefers-reduced-motion: no-preference) {
+  html[data-header-pinned] .page-controls { animation: pinned-controls 180ms ease-out; }
+  @keyframes pinned-controls {
+    from { opacity: 0; transform: translateY(-6px); }
+  }
+}
+@media screen and (prefers-reduced-motion: reduce) {
+  .hero::after { opacity: 0; transform: none; }
+  html[data-header-pinned] .hero::after { opacity: 1; }
+}
 .eyebrow, .entry-period, dt, .tags, .button { font-family: var(--mono); font-size: .875rem; }
 .eyebrow { margin: 0; color: var(--acc); }
 h1, h2, h3 { font-weight: 500; line-height: 1.08; overflow-wrap: anywhere; }
@@ -326,8 +374,9 @@ dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 }
 
 @media screen and (max-width: 900px), screen and (max-height: 510px) {
-  html { scroll-padding-top: 58px; }
+  html { scroll-padding-top: calc(58px + var(--pinned-header-height)); }
   .nav { position: sticky; inset: 0 auto auto; display: block; width: auto; padding-inline: 12px; background: var(--pbg); border-bottom: 1px solid var(--line2); }
+  html[data-header-pinned] .nav { top: var(--pinned-header-height); }
   .tree { --trunk: 19px; grid-template-columns: repeat(6, minmax(0, 1fr)); height: 56px; max-width: 440px; margin-inline: auto; }
   .tree::before { inset: var(--trunk) 0 auto; width: auto; height: 1px; }
   .tree-node { align-items: flex-start; justify-content: center; padding: calc(var(--trunk) + var(--branch) - var(--node-size) / 2) 0 0; }
@@ -345,6 +394,10 @@ dd { margin: 2px 0 0; overflow-wrap: anywhere; }
   .cell:nth-child(even) { border-left: 0; }
   .cell + .cell { border-top: 1px solid var(--line); }
   .profile-details > div { padding-inline: 14px; }
+  html[data-header-pinned] .page-controls { gap: 5px; padding-inline: 8px; }
+  .pinned-actions .button { padding-inline: 5px; font-size: .6875rem; }
+  html[data-header-pinned] .pinned-actions { gap: 4px; }
+  html[data-header-pinned] .page-controls :is(.languages, .themes) { grid-auto-columns: 24px; }
 }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
